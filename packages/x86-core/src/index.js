@@ -322,6 +322,45 @@ export class X86Cpu {
     return value;
   }
 
+  #deliverSoftwareInterrupt(vector, returnIp, start) {
+    if (this.mode !== 32) throw new CpuFault("Software interrupt delivery currently supports 32-bit mode only", start);
+    let gate;
+    try {
+      gate = this.idt.readGate(vector, { cpl: this.segments.cpl, software: true });
+      if (gate.taskGate) throw new Error("Task gates are not supported");
+      const target = this.gdt.readSegment(gate.selector, { cpl: this.segments.cpl });
+      if (!target || !target.executable || !target.present) throw new Error("Interrupt target is not a present code segment");
+      if (target.dpl !== this.segments.cpl || (gate.selector & 3) !== this.segments.cpl) {
+        throw new Error("Interrupt privilege stack switching is not implemented");
+      }
+      if (gate.offset > target.limit || target.base + gate.offset >= BigInt(this.memory.byteLength)) {
+        throw new Error("Interrupt target exceeds code segment or guest memory");
+      }
+      this.#push(this.flags, 32);
+      this.#push(BigInt(this.segments.registers.cs.selector), 32);
+      this.#push(BigInt(returnIp), 32);
+      this.segments.installCodeSegment(gate.selector);
+      this.ip = Number(gate.offset);
+      if (gate.interruptGate) this.flags &= ~(1n << 9n);
+      this.flags &= ~(1n << 8n);
+    } catch (error) { throw new CpuFault(error.message, start); }
+  }
+
+  #returnFromInterrupt(start) {
+    if (this.mode !== 32) throw new CpuFault("IRET currently supports 32-bit mode only", start);
+    const targetOffset = this.#pop(32);
+    const selector = Number(this.#pop(32) & 0xffffn);
+    const restoredFlags = this.#pop(32);
+    try {
+      const cache = this.segments.installCodeSegment(selector);
+      if (targetOffset > cache.limit || cache.base + targetOffset >= BigInt(this.memory.byteLength)) {
+        throw new Error("IRET target exceeds code segment or guest memory");
+      }
+      this.ip = Number(targetOffset);
+      this.flags = (restoredFlags & 0x003f7fd7n) | 2n;
+    } catch (error) { throw new CpuFault(error.message, start); }
+  }
+
   step() {
     if (this.halted) return { state: "halted", ip: this.ip };
     const start = this.ip;
@@ -335,7 +374,12 @@ export class X86Cpu {
     const width = (rex & 8) ? 64 : (operand16 ? 16 : 32);
     const addressWidth = this.mode === 64 && !address32 ? 64 : 32;
 
-    if (opcode === 0x90) {
+    if (opcode === 0xcd || opcode === 0xcc) {
+      const vector = opcode === 0xcc ? 3 : this.#fetch8();
+      this.#deliverSoftwareInterrupt(vector, this.ip, start);
+    } else if (opcode === 0xcf) {
+      this.#returnFromInterrupt(start);
+    } else if (opcode === 0x90) {
       // NOP
     } else if (opcode === 0xf4) {
       this.halted = true;
