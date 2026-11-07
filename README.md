@@ -36,6 +36,14 @@ npm run build
 npm start
 ```
 
+Create a source distribution ZIP (includes the production browser build):
+
+```sh
+npm run package
+```
+
+The ZIP is written to `dist/NEXARA-package.zip`. On a fresh machine, extract it, install Node.js 20+ and the native build prerequisites for `node-pty`, then run `npm install` followed by `npm run dev`. This is a source distribution, not a self-contained native executable; the PTY dependency is compiled for the target operating system during installation.
+
 ## Architecture
 
 - `apps/web`: browser workspace and terminal client.
