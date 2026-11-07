@@ -72,3 +72,15 @@ test("rejects invalid table bounds and selector values", () => {
   assert.throws(() => table.readSegment(-1), /selector/);
   assert.throws(() => table.readSegment(4), /LDT/);
 });
+
+test("rejects reserved fields and task gates in 64-bit IDT entries", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const idt = new X86DescriptorTable(memory, { base: 0, limit: 0x0fff, kind: "idt", longMode: true });
+  const reserved = new Uint8Array(16);
+  reserved[2] = 8; reserved[5] = 0x8e; reserved[12] = 1;
+  memory.write(0, reserved);
+  assert.throws(() => idt.readGate(0), /Reserved/);
+  reserved[12] = 0; reserved[5] = 0x85;
+  memory.write(0, reserved);
+  assert.throws(() => idt.readGate(0), /gate type/);
+});
