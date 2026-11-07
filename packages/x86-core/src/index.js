@@ -153,8 +153,9 @@ export class X86Cpu {
       if (opcode === 0x31) this.#binary("xor", rm, reg, width);
       if (opcode === 0x33) this.#binary("xor", reg, rm, width);
     } else if ([0x05,0x2d,0x35].includes(opcode)) {
-      const bytes = width / 8;
-      const immediate = this.#fetchUnsigned(bytes);
+      const bytes = width === 64 ? 4 : width / 8;
+      let immediate = this.#fetchUnsigned(bytes);
+      if (width === 64 && (immediate & 0x80000000n)) immediate |= 0xffffffff00000000n;
       const a = this.getRegister(0, width);
       const operation = opcode === 0x05 ? "add" : opcode === 0x2d ? "sub" : "xor";
       const result = operation === "add" ? a + immediate : operation === "sub" ? a - immediate : a ^ immediate;
