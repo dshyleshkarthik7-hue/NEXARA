@@ -42,3 +42,12 @@ test("round-trips system-table state and rejects incompatible or corrupt snapsho
   assert.throws(() => second.restore({ ...snapshot, longMode: false }), /incompatible/);
   assert.throws(() => second.restore({ ...snapshot, gdtr: { base: "999999", limit: 0xffff } }), /exceeds/);
 });
+
+test("reset GDTR and IDTR limits fit small configured guest memory", () => {
+  const memory = new GuestMemory({ initialPages: 1, maximumPages: 1 });
+  const tables = new X86SystemTableState(memory);
+  assert.equal(tables.snapshot().gdtr.limit, memory.byteLength - 1);
+  assert.equal(tables.snapshot().idtr.limit, memory.byteLength - 1);
+  const restored = new X86SystemTableState(memory);
+  assert.deepEqual(restored.restore(tables.snapshot()), tables.snapshot());
+});
