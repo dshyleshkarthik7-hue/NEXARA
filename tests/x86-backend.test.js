@@ -52,3 +52,30 @@ test("hexadecimal program parser rejects empty and malformed bytes", () => {
   assert.throws(() => parseHexProgram("B8 2"), TypeError);
   assert.throws(() => parseHexProgram("GG"), TypeError);
 });
+
+
+test("MMU-backed machine fetches instructions and accesses guest data through mappings", async () => {
+  const backend = new X86InterpreterBackend();
+  const machine = await backend.createMachine({ mode: 32, memoryPages: 2, virtualMemory: true });
+  assert.ok(machine.addressSpace);
+  machine.loadProgram(Uint8Array.from([0x8b,0x03,0xf4]));
+  machine.setRegister(3, 0x1000n, 32);
+  machine.writeMemory(0x1000, Uint8Array.of(0x78,0x56,0x34,0x12));
+  const result = machine.run();
+  assert.equal(result.state, "halted");
+  assert.equal(machine.getRegister(0,32), 0x12345678n);
+});
+
+test("MMU-backed CPU enforces data read and instruction execute permissions", async () => {
+  const backend = new X86InterpreterBackend();
+  const machine = await backend.createMachine({ mode: 32, memoryPages: 2, virtualMemory: true });
+  machine.loadProgram(Uint8Array.from([0x8b,0x03,0xf4]));
+  machine.setRegister(3, 0x1000n, 32);
+  machine.addressSpace.protect(0x1000n, { read: false });
+  assert.throws(() => machine.step(), error => error.name === "PageFault" && error.present);
+
+  const execute = await backend.createMachine({ mode: 32, memoryPages: 1, virtualMemory: true });
+  execute.loadProgram(Uint8Array.from([0xf4]));
+  execute.addressSpace.protect(0n, { execute: false });
+  assert.throws(() => execute.step(), error => error.name === "PageFault" && error.instruction);
+});
