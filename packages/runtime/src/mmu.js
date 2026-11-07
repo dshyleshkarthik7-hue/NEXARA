@@ -144,7 +144,7 @@ export class GuestAddressSpace {
   }
 
   fetch(virtualAddress, length, options = {}) {
-    return this.read(virtualAddress, length, { ...options, execute: true });
+    return this.read(virtualAddress, length, { ...options, read: false, execute: true });
   }
 
   get mappingCount() { return this.#mappings.size; }
