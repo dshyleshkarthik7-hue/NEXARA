@@ -237,7 +237,7 @@ test("legacy paging snapshots preserve CR3 and controls but discard cached trans
   assert.equal(restored.pse, true);
   assert.equal(restored.writeProtect, true);
   assert.equal(restored.translate(0), 0x2000);
-  assert.throws(() => restored.restore({ ...state, cr3: "4096" }), RangeError);
+  assert.throws(() => restored.restore({ ...state, cr3: "20480" }), RangeError);
   assert.throws(() => restored.restore({ ...state, writeProtect: "false" }), TypeError);
 });
 
