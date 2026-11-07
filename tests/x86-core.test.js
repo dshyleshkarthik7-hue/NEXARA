@@ -29,9 +29,34 @@ test("executes register-direct arithmetic and short branch", () => {
   assert.equal(cpu.getRegister(0, 32), 5n);
 });
 
-test("rejects unsupported memory addressing and opcodes", () => {
+test("supports memory-indirect MOV using a base register", () => {
+  const cpu = cpuFor([0x89,0x08, 0x8b,0x18, 0xf4], 32);
+  cpu.setRegister(0, 128n, 32);
+  cpu.setRegister(1, 0xdecafbadn, 32);
+  cpu.run();
+  assert.equal(cpu.getRegister(3, 32), 0xdecafbadn);
+  assert.deepEqual([...cpu.memory.read(128, 4)], [0xad,0xfb,0xca,0xde]);
+});
+
+test("supports push and pop with a bounded guest stack", () => {
+  const cpu = cpuFor([0xb8,0x78,0x56,0x34,0x12, 0x50, 0x5b, 0xf4], 32);
+  cpu.setRegister(4, 512n, 32);
+  cpu.run();
+  assert.equal(cpu.getRegister(3, 32), 0x12345678n);
+  assert.equal(cpu.getRegister(4, 32), 512n);
+});
+
+test("supports compare and conditional jump", () => {
+  const cpu = cpuFor([0xb8,1,0,0,0, 0x3d,1,0,0,0, 0x74,0x01, 0xf4, 0xf4], 32);
+  cpu.run();
+  assert.equal(cpu.halted, true);
+  assert.equal(cpu.ip, 14);
+});
+
+test("rejects invalid memory accesses and unsupported opcodes", () => {
   const cpu = cpuFor([0x8b,0x00], 32);
-  assert.throws(() => cpu.step(), CpuFault);
+  cpu.setRegister(0, 4095n, 32);
+  assert.throws(() => cpu.step(), RangeError);
   const other = cpuFor([0x0f], 32);
   assert.throws(() => other.step(), CpuFault);
 });
