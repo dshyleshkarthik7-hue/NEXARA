@@ -104,3 +104,24 @@ test("rejects absent, non-system and out-of-limit system descriptors", () => {
   assert.throws(() => table.readSystemDescriptor(8), /code\/data/);
   assert.throws(() => table.readSystemDescriptor(0x800), /limit/);
 });
+
+test("decodes the full 64-bit base of a long-mode TSS descriptor", () => {
+  const { memory, table } = memoryWithTable();
+  memory.write(0x108, Uint8Array.from([
+    0x67, 0x00, 0x78, 0x56, 0x34, 0x89, 0x00, 0x12,
+    0xf0, 0xde, 0xbc, 0x9a, 0x00, 0x00, 0x00, 0x00
+  ]));
+  const descriptor = table.readSystemDescriptor(8, { allowedTypes: [9] });
+  assert.equal(descriptor.width, 16);
+  assert.equal(descriptor.base, 0x9abcdef012345678n);
+  assert.equal(descriptor.limit, 0x67n);
+});
+
+test("rejects reserved bits in a 64-bit TSS descriptor upper half", () => {
+  const { memory, table } = memoryWithTable();
+  memory.write(0x108, Uint8Array.from([
+    0x67, 0x00, 0x78, 0x56, 0x34, 0x89, 0x00, 0x12,
+    0xf0, 0xde, 0xbc, 0x9a, 0x01, 0x00, 0x00, 0x00
+  ]));
+  assert.throws(() => table.readSystemDescriptor(8, { allowedTypes: [9] }), /Reserved/);
+});
