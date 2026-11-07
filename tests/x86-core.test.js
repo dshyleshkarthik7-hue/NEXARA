@@ -169,3 +169,14 @@ test("accumulator AND and OR immediate operations execute", () => {
   cpu.run();
   assert.equal(cpu.getRegister(0, 32), 0x0en);
 });
+
+test("group-1 immediate OR and AND variants execute", () => {
+  const cpu = cpuFor([
+    0xb8,0x0f,0,0,0,
+    0x83,0xc8,0x30,
+    0x83,0xe0,0x3c,
+    0xf4
+  ], 32);
+  cpu.run();
+  assert.equal(cpu.getRegister(0, 32), 0x3cn);
+});
