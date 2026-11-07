@@ -379,6 +379,26 @@ export class X86Cpu {
         this.setRegister(0, quotient, width);
         this.setRegister(2, remainder, width);
       }
+    } else if (opcode === 0xff) {
+      const decoded = this.#decodeModRM(rex, addressWidth);
+      const extension = decoded.reg & 7;
+      const operandWidth = this.mode === 64 ? (rex & 8 ? 64 : 32) : width;
+      const value = this.#readOperand(decoded.operand, operandWidth);
+      if (extension === 0 || extension === 1) {
+        const carry = this.flags & CF;
+        const result = this.#alu(extension === 0 ? "add" : "sub", value, 1n, operandWidth);
+        this.flags = (this.flags & ~CF) | carry;
+        this.#writeOperand(decoded.operand, result, operandWidth);
+      } else if (extension === 2 || extension === 4) {
+        const target = value & this.#mask(this.mode);
+        if (target >= BigInt(this.memory.byteLength)) throw new CpuFault("Indirect branch target outside memory", start);
+        if (extension === 2) this.#push(BigInt(this.ip), this.#stackWidth(width));
+        this.ip = Number(target);
+      } else if (extension === 6) {
+        this.#push(value, this.#stackWidth(width));
+      } else {
+        throw new CpuFault("Unsupported FF integer extension", start);
+      }
     } else if (opcode === 0xc7) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       if (((decoded.reg & 7) !== 0)) throw new CpuFault("Unsupported C7 extension", start);
