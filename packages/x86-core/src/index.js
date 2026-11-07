@@ -35,6 +35,75 @@ export class X86Cpu {
     this.flags = 2n;
     this.halted = false;
     this.instructionsExecuted = 0;
+    this.controlRegisters = new Map([[0, 0x60000010n], [3, 0n], [4, 0n]]);
+    this.efer = 0n;
+  }
+
+  readControlRegister(index) {
+    if (![0, 3, 4].includes(index)) throw new CpuFault("Unsupported control register", this.ip);
+    return this.controlRegisters.get(index);
+  }
+
+  #syncPagingState() {
+    const cr0 = this.controlRegisters.get(0);
+    const cr4 = this.controlRegisters.get(4);
+    const paging = (cr0 & (1n << 31n)) !== 0n;
+    const pae = (cr4 & (1n << 5n)) !== 0n;
+    const lme = (this.efer & (1n << 8n)) !== 0n;
+    if (paging && (cr0 & 1n) === 0n) throw new CpuFault("CR0.PG requires CR0.PE", this.ip);
+    if (paging && this.mode === 64 && !pae) throw new CpuFault("Long-mode paging requires CR4.PAE", this.ip);
+    if (paging && lme && !pae) throw new CpuFault("EFER.LME requires CR4.PAE", this.ip);
+    if (this.mode === 64 && paging && lme) this.efer |= 1n << 10n;
+    else this.efer &= ~(1n << 10n);
+    if (this.addressSpace) {
+      if (paging) this.addressSpace.setPageTableRoot(this.controlRegisters.get(3));
+      else this.addressSpace.clearPageTableRoot();
+      this.addressSpace.setNxEnabled((this.efer & (1n << 11n)) !== 0n);
+    }
+  }
+
+  writeControlRegister(index, value) {
+    const next = BigInt(value) & 0xffffffffffffffffn;
+    if (index === 0) {
+      const allowed = 0x00000000e005003fn;
+      if ((next & ~allowed) !== 0n) throw new CpuFault("CR0 contains reserved bits", this.ip);
+      if ((next & (1n << 31n)) !== 0n && (next & 1n) === 0n) {
+        throw new CpuFault("CR0.PG requires CR0.PE", this.ip);
+      }
+    } else if (index === 3) {
+      if ((next & 0xfffn) !== 0n) throw new CpuFault("CR3 must be 4 KiB aligned", this.ip);
+      if (next >= BigInt(this.memory.byteLength)) throw new CpuFault("CR3 exceeds guest physical memory", this.ip);
+    } else if (index === 4) {
+      const allowed = 0x0000000000777fffn;
+      if ((next & ~allowed) !== 0n) throw new CpuFault("CR4 contains reserved bits", this.ip);
+      if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n && this.mode === 64 && (next & (1n << 5n)) === 0n) {
+        throw new CpuFault("Cannot clear CR4.PAE while paging is active in 64-bit mode", this.ip);
+      }
+    } else {
+      throw new CpuFault("Unsupported control register", this.ip);
+    }
+    const previous = this.controlRegisters.get(index);
+    this.controlRegisters.set(index, next);
+    try { this.#syncPagingState(); }
+    catch (error) { this.controlRegisters.set(index, previous); this.#syncPagingState(); throw error; }
+    return next;
+  }
+
+  readMsr(index) {
+    if (index !== 0xc0000080) throw new CpuFault("Unsupported model-specific register", this.ip);
+    return this.efer;
+  }
+
+  writeMsr(index, value) {
+    if (index !== 0xc0000080) throw new CpuFault("Unsupported model-specific register", this.ip);
+    const next = BigInt(value) & 0xffffffffffffffffn;
+    const allowed = 0x901n; // SCE, LME and NXE; LMA is read-only
+    if ((next & ~allowed) !== 0n) throw new CpuFault("EFER contains reserved or read-only bits", this.ip);
+    const previous = this.efer;
+    this.efer = next | (previous & (1n << 10n));
+    try { this.#syncPagingState(); }
+    catch (error) { this.efer = previous; this.#syncPagingState(); throw error; }
+    return this.efer;
   }
 
   #mask(width) { return (1n << BigInt(width)) - 1n; }
@@ -574,6 +643,8 @@ export class X86Cpu {
       flags: this.flags.toString(),
       halted: this.halted,
       instructionsExecuted: this.instructionsExecuted,
+      controlRegisters: Object.fromEntries([...this.controlRegisters].map(([key,value]) => [String(key), value.toString()])),
+      efer: this.efer.toString(),
       memory: this.memory.snapshot(),
       addressSpace: this.addressSpace ? this.addressSpace.snapshot() : null,
       pageTableRoot: this.addressSpace?.pageTableRoot === null || !this.addressSpace ? null : this.addressSpace.pageTableRoot.toString()
@@ -588,6 +659,8 @@ export class X86Cpu {
       || typeof state.flags !== "string" || !/^\d+$/.test(state.flags)
       || typeof state.halted !== "boolean"
       || !Number.isSafeInteger(state.instructionsExecuted) || state.instructionsExecuted < 0
+      || !state.controlRegisters || !["0","3","4"].every(key => typeof state.controlRegisters[key] === "string" && /^\d+$/.test(state.controlRegisters[key]))
+      || typeof state.efer !== "string" || !/^\d+$/.test(state.efer)
       || !(state.memory instanceof Uint8Array) || state.memory.byteLength <= state.ip
       || state.memory.byteLength % 4096 !== 0
       || (this.addressSpace && !Array.isArray(state.addressSpace))
@@ -611,6 +684,9 @@ export class X86Cpu {
     this.flags = flags;
     this.halted = state.halted;
     this.instructionsExecuted = state.instructionsExecuted;
+    this.controlRegisters = new Map(["0","3","4"].map(key => [Number(key), BigInt(state.controlRegisters[key])]));
+    this.efer = BigInt(state.efer);
+    this.#syncPagingState();
   }
 
   registerSnapshot() {
