@@ -180,3 +180,29 @@ test("group-1 immediate OR and AND variants execute", () => {
   cpu.run();
   assert.equal(cpu.getRegister(0, 32), 0x3cn);
 });
+
+test("CPU save state restores registers flags instruction pointer and memory", () => {
+  const cpu = cpuFor([0xb8,0x2a,0,0,0,0xf4], 32);
+  cpu.setRegister(4, 512n, 32);
+  cpu.memory.writeU32(128, 0xdecafbad);
+  cpu.step();
+  const state = cpu.saveState();
+  cpu.setRegister(0, 99n, 32);
+  cpu.memory.writeU32(128, 0);
+  cpu.step();
+  cpu.loadState(state);
+  assert.equal(cpu.getRegister(0, 32), 42n);
+  assert.equal(cpu.getRegister(4, 32), 512n);
+  assert.equal(cpu.ip, 5);
+  assert.equal(cpu.halted, false);
+  assert.equal(cpu.memory.readU32(128), 0xdecafbad);
+});
+
+test("CPU rejects incompatible or malformed save states without changing state", () => {
+  const cpu = cpuFor([0xf4], 32);
+  const before = cpu.saveState();
+  assert.throws(() => cpu.loadState({ ...before, mode: 64 }), TypeError);
+  assert.throws(() => cpu.loadState({ ...before, registers: ["not-a-register"] }), TypeError);
+  assert.equal(cpu.ip, before.ip);
+  assert.equal(cpu.halted, before.halted);
+});
