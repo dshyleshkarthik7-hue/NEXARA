@@ -328,7 +328,9 @@ export class X86LegacyPaging32 {
 
     const large = (pde & 0x80) !== 0;
     if (large && !this.pse) throw new PageFault(linear, { present: true, write, user, reserved: true, instruction: execute });
-    if (large && (pde & 0x003fe000) !== 0) {
+    // In a 4 MiB PDE, bit 12 is the PAT selector; bits 13-21 are reserved
+    // in this non-PSE-36 implementation and must fault when set.
+    if (large && (pde & 0x003ee000) !== 0) {
       throw new PageFault(linear, { present: true, write, user, reserved: true, instruction: execute });
     }
     let pteAddress = null;
