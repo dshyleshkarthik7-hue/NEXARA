@@ -642,16 +642,23 @@ test("LGDT and LIDT load bounded 32-bit pseudo-descriptors", () => {
 });
 
 test("LLDT loads an LDT descriptor and LTR marks an available 32-bit TSS busy", () => {
-  const cpu = cpuFor([0x0f,0x01,0x15,0x80,0,0,0,0xb8,0x08,0,0,0,0x0f,0x00,0xd0,0xb8,0x10,0,0,0,0x0f,0x00,0xd8,0xf4], 32);
+  const cpu = cpuFor([0x0f,0x01,0x15,0x80,0,0,0,0xb8,0x08,0,0,0,0x0f,0x00,0xd0,0xb8,0x0c,0,0,0,0x8e,0xd8,0xb8,0x10,0,0,0,0x0f,0x00,0xd8,0xf4], 32);
   cpu.memory.write(0x80, Uint8Array.from([0x27,0,0x00,0x01,0,0]));
   cpu.memory.write(0x108, Uint8Array.from([0x0f,0,0x00,0x03,0,0x82,0,0]));
   cpu.memory.write(0x110, Uint8Array.from([0x67,0,0x00,0x04,0,0x89,0,0]));
+  cpu.memory.write(0x308, Uint8Array.from([0xff,0xff,0,0,0,0x92,0xcf,0]));
   cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
-  cpu.run({ maxInstructions: 6 });
+  cpu.run({ maxInstructions: 8 });
   assert.equal(cpu.systemTables.ldtr.selector, 0x08);
+  assert.equal(cpu.segments.snapshot().ds.selector, 0x0c);
+  assert.equal(cpu.segments.snapshot().ds.writable, true);
   assert.equal(cpu.systemTables.task.selector, 0x10);
   assert.equal(cpu.systemTables.task.busy, true);
   assert.equal(cpu.memory.read(0x115, 1)[0] & 0x0f, 0x0b);
+  const restored = cpuFor([0xf4], 32);
+  restored.loadState(cpu.saveState());
+  assert.equal(restored.segments.ldt.base, 0x300n);
+  assert.equal(restored.segments.snapshot().ds.selector, 0x0c);
 });
 
 
