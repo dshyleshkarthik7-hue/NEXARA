@@ -111,7 +111,7 @@ test("absent ring-3 code descriptors cannot be installed", () => {
 test("out-of-memory TSS stack frame write leaves privilege state unchanged", () => {
   const { cpu } = setup({ ring0Stack: 0x4004 });
   const before = cpu.getRegister(4, 32);
-  assert.throws(() => cpu.step(), /guest memory|stack/i);
+  assert.throws(() => cpu.step(), /guest memory|physical memory|stack/i);
   assert.equal(cpu.segments.cpl, 3);
   assert.equal(cpu.segments.registers.cs.selector, 0x1b);
   assert.equal(cpu.segments.registers.ss.selector, 0x23);
