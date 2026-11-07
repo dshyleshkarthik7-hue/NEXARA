@@ -132,11 +132,11 @@ export class GuestAddressSpace {
     for (let level = 0; level < 4; level++) {
       const entryAddress = table + BigInt(indexes[level] * 8);
       const entry = this.#readEntry(entryAddress);
+      const present = (entry & 1n) !== 0n;
+      if (!present) throw new PageFault(virtual, { write, user, instruction: execute });
       if ((entry & 0x7fff000000000000n) !== 0n) {
         throw new PageFault(virtual, { present: true, write, user, reserved: true, instruction: execute });
       }
-      const present = (entry & 1n) !== 0n;
-      if (!present) throw new PageFault(virtual, { write, user, instruction: execute });
       effectiveWrite &&= (entry & 2n) !== 0n;
       effectiveUser &&= (entry & 4n) !== 0n;
       effectiveExecute &&= (entry & (1n << 63n)) === 0n;
