@@ -111,3 +111,10 @@ This is not complete protected mode. Real-mode execution and transitions, full d
 
 
 A further constrained 32-bit ring-0 interrupt path supports software INT/INT3 through present IDT interrupt/trap gates and same-privilege IRET frames. It does not implement hardware IRQ routing, exception prioritization/error-code frames, privilege-changing gates, TSS/IST stack switching, nested-fault escalation or full architectural EFLAGS restoration. It must not be used as a kernel-ready interrupt controller.
+
+
+## Legacy 32-bit paging primitive (experimental)
+
+`packages/runtime/src/mmu.js` now includes `X86LegacyPaging32`, a separate non-PAE 32-bit x86 page-table walker. It implements CR3 page-directory selection, two-level PDE/PTE translation, optional CR4.PSE 4 MiB mappings, user/supervisor and writable checks, CR0.WP-style supervisor write protection, page-fault error-code metadata, and hardware-style accessed/dirty bit updates including writes that hit the software TLB.
+
+This class is currently a standalone runtime primitive. It is **not yet wired into X86Cpu's CR0/CR3/CR4 execution or all instruction/data fetches**, so guest code cannot yet rely on it for enforced paging. It does not implement PAE 32-bit paging, global pages, full reserved-bit rules, physical memory-mapped device translation, or architectural page-fault/interrupt delivery.
