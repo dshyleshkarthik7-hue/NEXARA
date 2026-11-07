@@ -233,6 +233,18 @@ export class PcAtInterruptFabric {
     this.pit = pit;
   }
 
+  read(port, width = 8) {
+    if (width !== 8) throw new RangeError("PC/AT PIC and PIT ports currently support byte reads only");
+    return this.ioRead(port);
+  }
+
+  write(port, value, width = 8) {
+    if (width !== 8) throw new RangeError("PC/AT PIC and PIT ports currently support byte writes only");
+    const numeric = Number(value);
+    if (!Number.isInteger(numeric) || numeric < 0 || numeric > 255) throw new RangeError("I/O value must fit in one byte");
+    return this.ioWrite(port, numeric);
+  }
+
   ioWrite(port, value) {
     if (!Number.isInteger(port) || port < 0 || port > 0xffff) throw new RangeError("Invalid I/O port");
     if (port === 0x20 || port === 0x21 || port === 0xa0 || port === 0xa1) return this.pic.write(port, value);
