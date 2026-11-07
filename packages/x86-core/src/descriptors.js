@@ -1,7 +1,6 @@
 import { GuestMemory } from "../../runtime/src/index.js";
 
 const U64_MASK = 0xffffffffffffffffn;
-const SEGMENT_TYPES = new Set([0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x9,0xb,0xc,0xe,0xf]);
 
 function asU64(value, name) {
   let result;
@@ -80,7 +79,6 @@ export class X86DescriptorTable {
     const system = (access & 0x10) === 0;
     const dpl = (access >>> 5) & 3;
     const present = (access & 0x80) !== 0;
-    if (!system && !SEGMENT_TYPES.has(type)) throw new RangeError("Reserved segment descriptor type");
     if (requirePresent && !present) throw new Error("Segment-not-present fault");
     if (!system) {
       const conforming = (type & 4) !== 0;
@@ -92,6 +90,9 @@ export class X86DescriptorTable {
     if ((flags & 0x80) !== 0) limit = (limit << 12n) | 0xfffn;
     const base = baseLow | (baseMid << 16n) | (baseHigh << 24n);
     const isCode = !system && (type & 8) !== 0;
+    const long = (flags & 0x20) !== 0;
+    const defaultSize = (flags & 0x40) !== 0;
+    if (long && (!isCode || defaultSize)) throw new RangeError("Invalid long-mode code descriptor flags");
     const descriptor = {
       selector, index, rpl, dpl, present, system, type,
       executable: isCode,
@@ -102,8 +103,8 @@ export class X86DescriptorTable {
       accessed: (type & 1) !== 0,
       base, limit,
       granularity: (flags & 0x80) !== 0,
-      defaultSize: (flags & 0x40) !== 0,
-      long: (flags & 0x20) !== 0,
+      defaultSize,
+      long,
       available: (flags & 0x10) !== 0,
       raw: bytes
     };
