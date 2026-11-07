@@ -89,6 +89,11 @@ test("long-mode interrupt selects IST1 instead of RSP0 when the gate requests it
 
 test("long-mode exception entry places a 32-bit error code in an eight-byte frame slot", () => {
   const { cpu, memory } = setupLongMode();
+  const gate = new Uint8Array(16);
+  gate[0] = 0x00; gate[1] = 0x07;
+  gate[2] = 0x08; gate[3] = 0x00;
+  gate[5] = 0x8e;
+  memory.write(0x1000 + 14 * 16, gate);
   const result = cpu.deliverException(14, { errorCode: 5, returnIp: 0x650 });
   assert.equal(result.vector, 14);
   assert.equal(cpu.getRegister(4, 64), 0x3000n - 48n);
