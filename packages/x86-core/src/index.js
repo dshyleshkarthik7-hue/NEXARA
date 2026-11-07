@@ -1,4 +1,5 @@
 import { GuestMemory } from "../../runtime/src/index.js";
+import { X86LegacyPaging32 } from "../../runtime/src/mmu.js";
 import { X86SystemTableState } from "./system-tables.js";
 import { X86DescriptorTable } from "./descriptors.js";
 import { X86SegmentState } from "./segments.js";
@@ -22,7 +23,7 @@ export class CpuFault extends Error {
  * No CPL/ring privilege model, segmentation, interrupt delivery, FPU/SIMD, or devices.
  */
 export class X86Cpu {
-  constructor({ memory, mode = 64, instructionPointer = 0, addressSpace = null } = {}) {
+  constructor({ memory, mode = 64, instructionPointer = 0, addressSpace = null, legacyPaging32 = null } = {}) {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
     if (mode !== 32 && mode !== 64) throw new RangeError("mode must be 32 or 64");
     if (!Number.isSafeInteger(instructionPointer) || instructionPointer < 0
@@ -30,9 +31,12 @@ export class X86Cpu {
       throw new RangeError("instructionPointer is outside guest memory");
     }
     if (addressSpace && addressSpace.memory !== memory) throw new TypeError("addressSpace must use the CPU guest memory");
+    if (legacyPaging32 !== null && (!(legacyPaging32 instanceof X86LegacyPaging32) || legacyPaging32.memory !== memory || mode !== 32)) throw new TypeError("legacyPaging32 must be a 32-bit paging engine using the CPU guest memory");
+    if (addressSpace && legacyPaging32) throw new TypeError("Choose one paging backend");
     if (addressSpace) addressSpace.translate(BigInt(instructionPointer), { execute: true });
     this.memory = memory;
     this.addressSpace = addressSpace;
+    this.legacyPaging32 = legacyPaging32;
     this.mode = mode;
     this.ip = instructionPointer;
     this.registers = Array.from({ length: 16 }, () => 0n);
@@ -68,11 +72,17 @@ export class X86Cpu {
     const pae = (cr4 & (1n << 5n)) !== 0n;
     const lme = (this.efer & (1n << 8n)) !== 0n;
     if (paging && (cr0 & 1n) === 0n) throw new CpuFault("CR0.PG requires CR0.PE", this.ip);
-    if (paging && this.mode !== 64) throw new CpuFault("32-bit paging is not implemented by this MMU", this.ip);
+    if (paging && this.mode !== 64 && !this.legacyPaging32) throw new CpuFault("32-bit paging requires the legacy paging backend", this.ip);
+    if (paging && this.mode === 32 && (cr4 & (1n << 5n)) !== 0n) throw new CpuFault("PAE paging is not implemented by the legacy backend", this.ip);
     if (paging && this.mode === 64 && !pae) throw new CpuFault("Long-mode paging requires CR4.PAE", this.ip);
     if (paging && lme && !pae) throw new CpuFault("EFER.LME requires CR4.PAE", this.ip);
     if (this.mode === 64 && paging && lme) this.efer |= 1n << 10n;
     else this.efer &= ~(1n << 10n);
+    if (this.legacyPaging32) {
+      this.legacyPaging32.setControl({ pse: (cr4 & (1n << 4n)) !== 0n, writeProtect: (cr0 & (1n << 16n)) !== 0n });
+      if (paging) this.legacyPaging32.loadCr3(this.controlRegisters.get(3));
+      else this.legacyPaging32.flush();
+    }
     if (this.addressSpace) {
       if (paging) this.addressSpace.setPageTableRoot(this.controlRegisters.get(3));
       else this.addressSpace.clearPageTableRoot();
@@ -92,7 +102,7 @@ export class X86Cpu {
       if ((next & 0xfffn) !== 0n) throw new CpuFault("CR3 must be 4 KiB aligned", this.ip);
       if (next >= BigInt(this.memory.byteLength)) throw new CpuFault("CR3 exceeds guest physical memory", this.ip);
     } else if (index === 4) {
-      const allowed = 0x0000000000000020n; // PAE only; other CR4 features are not implemented
+      const allowed = this.legacyPaging32 ? 0x0000000000000030n : 0x0000000000000020n; // PSE and PAE only where supported
       if ((next & ~allowed) !== 0n) throw new CpuFault("CR4 contains reserved bits", this.ip);
       if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n && this.mode === 64 && (next & (1n << 5n)) === 0n) {
         throw new CpuFault("Cannot clear CR4.PAE while paging is active in 64-bit mode", this.ip);
@@ -156,7 +166,7 @@ export class X86Cpu {
     if (code && this.mode !== 64 && BigInt(address) > code.limit) throw new CpuFault("Instruction fetch exceeds CS limit", address);
     const linear = BigInt(address) + (this.mode === 64 ? 0n : (code?.base ?? 0n));
     if (linear > BigInt(Number.MAX_SAFE_INTEGER)) throw new CpuFault("Instruction linear address exceeds host safe integer range", address);
-    return this.addressSpace ? this.addressSpace.fetch(linear, 1)[0] : this.memory.read(Number(linear), 1)[0];
+    return this.addressSpace ? this.addressSpace.fetch(linear, 1)[0] : this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n ? this.legacyPaging32.read(linear, 1, { execute: true, user: this.segments.cpl === 3 })[0] : this.memory.read(Number(linear), 1)[0];
   }
   #fetchUnsigned(bytes) {
     let value = 0n;
@@ -231,7 +241,7 @@ export class X86Cpu {
   #readOperand(operand, width) {
     if (operand.kind === "register") return this.getRegister(operand.index, width);
     const bytes = width / 8;
-    const data = this.addressSpace ? this.addressSpace.read(BigInt(operand.address), bytes) : this.memory.read(operand.address, bytes);
+    const data = this.addressSpace ? this.addressSpace.read(BigInt(operand.address), bytes) : this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n ? this.legacyPaging32.read(operand.address, bytes, { user: this.segments.cpl === 3 }) : this.memory.read(operand.address, bytes);
     let value = 0n;
     for (let i = 0; i < bytes; i++) value |= BigInt(data[i]) << BigInt(i * 8);
     return value;
@@ -244,6 +254,7 @@ export class X86Cpu {
     const data = new Uint8Array(bytes);
     for (let i = 0; i < bytes; i++) data[i] = Number((v >> BigInt(i * 8)) & 0xffn);
     if (this.addressSpace) this.addressSpace.write(BigInt(operand.address), data);
+    else if (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n) this.legacyPaging32.write(operand.address, data, { user: this.segments.cpl === 3 });
     else this.memory.write(operand.address, data);
   }
 
