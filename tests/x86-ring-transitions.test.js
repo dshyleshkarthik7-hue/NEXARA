@@ -4,7 +4,7 @@ import { GuestMemory } from "../packages/runtime/src/index.js";
 import { X86LegacyPaging32 } from "../packages/runtime/src/mmu.js";
 import { X86Cpu } from "../packages/x86-core/src/index.js";
 
-function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCode = false, paged = false } = {}) {
+function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCode = false, paged = false, unmappedKernelPage = false } = {}) {
   const memory = new GuestMemory({ initialPages: paged ? 5 : 2, maximumPages: paged ? 5 : 2 });
   const paging = paged ? new X86LegacyPaging32(memory) : null;
   const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x600, legacyPaging32: paging });
@@ -49,7 +49,7 @@ function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCo
     put32(0x3000, 0x4007);
     put32(0x4000, 0x0007);
     put32(0x4004, 0x1007);
-    put32(0x4008, 0x2003);
+    put32(0x4008, unmappedKernelPage ? 0 : 0x2003);
     cpu.writeControlRegister(3, 0x3000n);
     cpu.writeControlRegister(0, cpu.readControlRegister(0) | 0x80000000n);
   }
@@ -147,4 +147,15 @@ test("explicit exception delivery pushes the CPU error code ahead of the interru
   assert.equal(frame.getUint32(8, true), 0x1b);
   assert.equal(frame.getUint32(16, true), 0x1f00);
   assert.equal(frame.getUint32(20, true), 0x23);
+});
+
+test("preflights every page before writing a cross-page interrupt frame", () => {
+  const { cpu, memory } = setup({ paged: true, unmappedKernelPage: true, ring0Stack: 0x2004 });
+  const before = memory.read(0x1ff0, 16);
+  assert.throws(() => cpu.step(), /page fault|stack|guest IP/i);
+  assert.equal(cpu.segments.cpl, 3);
+  assert.equal(cpu.segments.registers.cs.selector, 0x1b);
+  assert.equal(cpu.segments.registers.ss.selector, 0x23);
+  assert.equal(cpu.getRegister(4, 32), 0x1f00n);
+  assert.deepEqual(memory.read(0x1ff0, 16), before);
 });
