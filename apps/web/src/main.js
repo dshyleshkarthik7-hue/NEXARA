@@ -7,6 +7,7 @@ const send = document.querySelector("#send-input");
 const status = document.querySelector("#terminal-status");
 const connection = document.querySelector("#connection-label");
 let sessionId = null;
+let sessionToken = null;
 let socket = null;
 
 function updateEditorMeta() {
@@ -33,21 +34,25 @@ function setConnected(connected) {
 }
 async function createSession() {
   try {
+    if (socket && socket.readyState === WebSocket.OPEN) socket.close();
     const response = await fetch(`${API}/api/sessions`, { method: "POST" });
     if (!response.ok) throw new Error(`Session request failed (${response.status})`);
     const data = await response.json();
     sessionId = data.id;
-    const wsUrl = API.replace(/^http/, "ws") + data.websocketPath;
+    sessionToken = data.token;
+    const wsUrl = new URL(data.websocketPath, API);
+    wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+    wsUrl.searchParams.set("token", sessionToken);
     socket = new WebSocket(wsUrl);
     socket.addEventListener("open", () => {
       setConnected(true);
-      appendOutput("\r\n[connected to host PTY]\r\n");
+      appendOutput("\r\n[connected to authenticated host PTY]\r\n");
       input.focus();
     });
     socket.addEventListener("message", event => {
       try {
         const message = JSON.parse(event.data);
-        if (message.type === "output") appendOutput(message.data);
+        if (message.type === "output" && typeof message.data === "string") appendOutput(message.data);
       } catch { /* Ignore malformed server frames. */ }
     });
     socket.addEventListener("close", () => setConnected(false));
@@ -69,7 +74,13 @@ document.querySelector("#terminal-form").addEventListener("submit", event => {
 document.querySelector("#clear-terminal").addEventListener("click", () => { output.replaceChildren(); });
 window.addEventListener("beforeunload", () => {
   if (socket) socket.close();
-  if (sessionId) fetch(`${API}/api/sessions/${sessionId}`, { method: "DELETE", keepalive: true });
+  if (sessionId && sessionToken) {
+    fetch(`${API}/api/sessions/${sessionId}`, {
+      method: "DELETE",
+      headers: { "x-session-token": sessionToken },
+      keepalive: true
+    });
+  }
 });
 fetch(`${API}/health`).then(r => {
   if (!r.ok) throw new Error("offline");
