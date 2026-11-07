@@ -129,3 +129,22 @@ test("ring-3 interrupt switches to a supervisor-only paged TSS stack", () => {
   assert.equal(frame.getUint32(12, true), 0x1f00);
   assert.equal(frame.getUint32(16, true), 0x23);
 });
+
+test("explicit exception delivery pushes the CPU error code ahead of the interrupt frame", () => {
+  const { cpu, memory } = setup();
+  const gate = new Uint8Array(8);
+  gate[0] = 0x00; gate[1] = 0x07;
+  gate[2] = 0x08; gate[3] = 0x00;
+  gate[5] = 0x8e;
+  memory.write(0x900 + 14 * 8, gate);
+  const result = cpu.deliverException(14, { errorCode: 5, returnIp: 0x650 });
+  assert.equal(result.vector, 14);
+  assert.equal(cpu.segments.cpl, 0);
+  assert.equal(cpu.getRegister(4, 32), 0x1800n - 24n);
+  const frame = new DataView(memory.read(0x1800 - 24, 24).buffer);
+  assert.equal(frame.getUint32(0, true), 5);
+  assert.equal(frame.getUint32(4, true), 0x650);
+  assert.equal(frame.getUint32(8, true), 0x1b);
+  assert.equal(frame.getUint32(16, true), 0x1f00);
+  assert.equal(frame.getUint32(20, true), 0x23);
+});
