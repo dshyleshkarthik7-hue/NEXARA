@@ -21,11 +21,12 @@
           <button class="nav-item active"><span>▤</span> Editor</button>
           <button class="nav-item"><span>⌘</span> Terminal</button>
           <div class="side-label files-label">OPEN FILES</div>
-          <button class="file-item active"><span>◈</span> untitled.txt</button>
+          <button id="new-file" class="nav-item" type="button"><span>＋</span> New file</button>
+          <div id="workspace-files" aria-label="Workspace files"></div>
           <div class="sidebar-footer"><span class="status-dot"></span> Local workspace</div>
         </aside>
         <section class="main-area">
-          <div class="tabbar"><div class="tab active"><span class="file-dot"></span> untitled.txt <span class="tab-close">×</span></div><span class="tab-hint">NEXARA EDITOR</span></div>
+          <div class="tabbar"><div class="tab active"><span class="file-dot"></span> <span id="active-filename">untitled.txt</span> <span class="tab-close">×</span></div><span class="tab-hint">NEXARA EDITOR</span></div>
           <div class="editor-wrap">
             <div class="line-numbers" id="line-numbers">1</div>
             <textarea id="editor" spellcheck="false" aria-label="Text editor" placeholder="Start writing…"></textarea>
@@ -35,7 +36,7 @@
             <div id="terminal-output" class="terminal-output" role="log" aria-live="polite"><div class="welcome">NEXARA host terminal <span>·</span> Create a session to begin</div></div>
             <form id="terminal-form" class="terminal-input-row"><span>›</span><input id="terminal-input" autocomplete="off" spellcheck="false" placeholder="Terminal input…" disabled /><button type="submit" disabled id="send-input">Send</button></form>
           </section>
-          <footer class="statusbar"><span>Plain Text</span><span id="cursor-position">Ln 1, Col 1</span><span>UTF-8</span><span>Spaces: 2</span></footer>
+          <footer class="statusbar"><span id="editor-save-status">Opening workspace…</span><span>Plain Text</span><span id="cursor-position">Ln 1, Col 1</span><span>UTF-8</span><span>Spaces: 2</span></footer>
         </section>
       </main>
     </div>
