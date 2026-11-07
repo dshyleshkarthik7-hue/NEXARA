@@ -53,3 +53,27 @@ test("workspace rejects oversized and non-text content", async () => {
   await assert.rejects(store.write("large.txt", "x".repeat(WORKSPACE_LIMITS.maxFileBytes + 1)), RangeError);
   await assert.rejects(store.write("bad.txt", new Uint8Array([1, 2])), TypeError);
 });
+
+import { randomUUID } from "node:crypto";
+import { indexedDB } from "fake-indexeddb";
+import { IndexedDbWorkspaceStore } from "../packages/workspace/src/index.js";
+
+test("IndexedDB workspace persists files and enforces revisions", async () => {
+  const store = new IndexedDbWorkspaceStore({ databaseName: `nexara-test-${randomUUID()}`, indexedDB });
+  try {
+    const first = await store.write("src/app.js", "first", { expectedRevision: null });
+    assert.equal(first.revision, 1);
+    const second = await store.write("src/app.js", "second", { expectedRevision: first.revision });
+    assert.equal(second.revision, 2);
+    assert.equal((await store.read("src/app.js")).content, "second");
+    assert.deepEqual((await store.list()).map(file => file.path), ["src/app.js"]);
+    await assert.rejects(
+      store.write("src/app.js", "stale", { expectedRevision: first.revision }),
+      WorkspaceConflictError
+    );
+    assert.equal(await store.delete("src/app.js", { expectedRevision: second.revision }), true);
+    assert.equal(await store.read("src/app.js"), null);
+  } finally {
+    await store.close();
+  }
+});
