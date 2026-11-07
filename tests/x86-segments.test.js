@@ -18,7 +18,7 @@ function setup() {
 test("loads readable data segments and permits null DS/ES/FS/GS", () => {
   const { gdt } = setup();
   const state = new X86SegmentState({ gdt, cpl: 0 });
-  assert.equal(state.loadData("ds", 0x10).cache.writable, true);
+  assert.equal(state.loadData("ds", 0x10).writable, true);
   assert.equal(state.loadData("es", 0).cache, null);
   assert.throws(() => state.loadData("cs", 0x08), /DS, ES, FS or GS/);
 });
@@ -34,7 +34,7 @@ test("loads SS only when writable data DPL and RPL match CPL", () => {
 test("installs CS cache only for executable segments with compatible privilege", () => {
   const { gdt } = setup();
   const ring0 = new X86SegmentState({ gdt, cpl: 0 });
-  assert.equal(ring0.installCodeSegment(0x08).cache.executable, true);
+  assert.equal(ring0.installCodeSegment(0x08).executable, true);
   assert.throws(() => ring0.installCodeSegment(0x18), /privilege/);
   const ring3 = new X86SegmentState({ gdt, cpl: 3 });
   assert.equal(ring3.installCodeSegment(0x1b).selector, 0x1b);
