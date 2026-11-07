@@ -11,6 +11,7 @@ NEXARA combines a lightweight editor, browser terminal client, server session ga
 - Server-side PTY sessions over WebSocket.
 - Per-session random credentials, constant-time credential comparison, WebSocket origin allowlisting, bounded input, and a configurable session ceiling.
 - Reduced environment inheritance for spawned shells.
+- PTY session registry with per-client active-session quotas, session-creation rate limits, constant-time per-session credential checks, idle expiry, and shutdown cleanup.
 - Shared client/server protocol and a bounds-checked guest-memory primitive with snapshots.
 - Experimental x86 interpreter with a limited 32/64-bit integer instruction subset, bounded execution, and validated CPU-plus-memory save-state restoration.
 - Automated protocol, memory-boundary, CPU-subset, save-state, and workspace-storage tests.
@@ -38,11 +39,11 @@ npm start
 ## Architecture
 
 - `apps/web`: browser workspace and terminal client.
-- `apps/server`: HTTP API and authenticated PTY/WebSocket session host.
+- `apps/server`: HTTP API and authenticated PTY/WebSocket session host with bounded session lifecycle controls.
 - `packages/protocol`: versioned and validated client/server messages.
 - `packages/runtime`: execution-backend contract and guest-memory primitives.
 - `packages/workspace`: IndexedDB persistence and an in-memory test adapter.
-- `tests`: protocol and memory safety tests.
+- `tests`: protocol, memory, CPU-subset, workspace persistence, and session lifecycle tests.
 
 ## Compatibility status
 
