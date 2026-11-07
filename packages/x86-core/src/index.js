@@ -696,10 +696,10 @@ export class X86Cpu {
             const limit = descriptor.limit;
             if (extension === 2) {
               if (type !== 2) throw new Error("LLDT requires an LDT system descriptor");
-              this.systemTables.loadLdtr({ selector, base, limit, present: true, usable: true });
+              this.systemTables.loadLdtr({ selector, base, limit: Number(limit), present: true, usable: true });
             } else {
               if (type !== 9) throw new Error("LTR requires an available 32-bit TSS descriptor");
-              this.systemTables.loadTaskRegister({ selector, base, limit, present: true, busy: true, usable: true });
+              this.systemTables.loadTaskRegister({ selector, base, limit: Number(limit), present: true, busy: true, usable: true });
               this.memory.write(Number(this.systemTables.gdtr.base) + ((selector >>> 3) * 8) + 5, Uint8Array.of((access & 0xf0) | 0x0b));
             }
           } catch (error) { throw new CpuFault(error.message, start); }
