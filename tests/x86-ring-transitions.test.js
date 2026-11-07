@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { GuestMemory } from "../packages/runtime/src/index.js";
+import { X86LegacyPaging32 } from "../packages/runtime/src/mmu.js";
 import { X86Cpu } from "../packages/x86-core/src/index.js";
 
 function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCode = false, paged = false } = {}) {
   const memory = new GuestMemory({ initialPages: paged ? 5 : 2, maximumPages: paged ? 5 : 2 });
-  const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x600 });
+  const paging = paged ? new X86LegacyPaging32(memory) : null;
+  const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x600, legacyPaging32: paging });
   const gdtBase = 0x100;
   const idtBase = 0x900;
   const putDescriptor = (index, { base = 0, limit = 0xfffff, access, flags = 0xc } = {}) => {
