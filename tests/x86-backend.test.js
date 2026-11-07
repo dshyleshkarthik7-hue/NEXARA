@@ -71,7 +71,7 @@ test("MMU-backed CPU enforces data read and instruction execute permissions", as
   const machine = await backend.createMachine({ mode: 32, memoryPages: 2, virtualMemory: true });
   machine.loadProgram(Uint8Array.from([0x8b,0x03,0xf4]));
   machine.setRegister(3, 0x1000n, 32);
-  machine.addressSpace.protect(0x1000n, { read: false });
+  machine.addressSpace.protect(0x1000n, { read: false, write: false });
   assert.throws(() => machine.step(), error => error.name === "PageFault" && error.present);
 
   const execute = await backend.createMachine({ mode: 32, memoryPages: 1, virtualMemory: true });
