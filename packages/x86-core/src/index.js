@@ -298,11 +298,11 @@ export class X86Cpu {
     } else if (opcode === 0x81 || opcode === 0x83) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       const extension = decoded.reg & 7;
-      if (![0, 5, 6, 7].includes(extension)) throw new CpuFault("Unsupported integer group-1 extension", start);
+      if (![0, 1, 4, 5, 6, 7].includes(extension)) throw new CpuFault("Unsupported integer group-1 extension", start);
       const immediateBytes = opcode === 0x83 ? 1 : (width === 16 ? 2 : 4);
       let immediate = opcode === 0x83 ? this.#fetchSigned(1) : this.#fetchUnsigned(immediateBytes);
       if (opcode === 0x81 && width === 64 && (immediate & 0x80000000n)) immediate |= 0xffffffff00000000n;
-      const operation = extension === 0 ? "add" : extension === 5 ? "sub" : extension === 6 ? "xor" : "cmp";
+      const operation = extension === 0 ? "add" : extension === 1 ? "or" : extension === 4 ? "and" : extension === 5 ? "sub" : extension === 6 ? "xor" : "cmp";
       const left = this.#readOperand(decoded.operand, width);
       const result = this.#alu(operation, left, immediate, width);
       if (operation !== "cmp") this.#writeOperand(decoded.operand, result, width);
