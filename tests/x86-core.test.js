@@ -564,3 +564,18 @@ test("F6 byte division faults on zero and quotient overflow", () => {
   overflow.setRegister(3, 1n, 8);
   assert.throws(() => overflow.step(), /quotient overflow/i);
 });
+
+
+test("FF group honors operand-size override for INC and PUSH", () => {
+  const inc = cpuFor([0x66,0xff,0xc0], 32);
+  inc.setRegister(0, 0x1234ffffn, 32);
+  inc.step();
+  assert.equal(inc.getRegister(0,32), 0x12340000n);
+
+  const push = cpuFor([0x66,0xff,0xf0], 64);
+  push.setRegister(0, 0x1234n, 16);
+  push.setRegister(4, 512n, 64);
+  push.step();
+  assert.equal(push.getRegister(4,64), 510n);
+  assert.deepEqual([...push.memory.read(510,2)], [0x34,0x12]);
+});
