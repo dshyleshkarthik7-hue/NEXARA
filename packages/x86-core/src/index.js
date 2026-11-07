@@ -143,7 +143,11 @@ export class X86Cpu {
   #fetch8() {
     if (!this.addressSpace && this.ip >= this.memory.byteLength) throw new CpuFault("Instruction fetch outside memory", this.ip);
     const address = this.ip++;
-    return this.addressSpace ? this.addressSpace.fetch(BigInt(address), 1)[0] : this.memory.read(address, 1)[0];
+    const code = this.segments?.registers.cs.cache;
+    if (code && this.mode !== 64 && BigInt(address) > code.limit) throw new CpuFault("Instruction fetch exceeds CS limit", address);
+    const linear = BigInt(address) + (this.mode === 64 ? 0n : (code?.base ?? 0n));
+    if (linear > BigInt(Number.MAX_SAFE_INTEGER)) throw new CpuFault("Instruction linear address exceeds host safe integer range", address);
+    return this.addressSpace ? this.addressSpace.fetch(linear, 1)[0] : this.memory.read(Number(linear), 1)[0];
   }
   #fetchUnsigned(bytes) {
     let value = 0n;
@@ -293,7 +297,9 @@ export class X86Cpu {
 
   #branch(displacement, start) {
     const target = this.ip + Number(displacement);
-    if (!Number.isSafeInteger(target) || target < 0 || (!this.addressSpace && target >= this.memory.byteLength)) {
+    const code = this.segments?.registers.cs.cache;
+    if (!Number.isSafeInteger(target) || target < 0 || (code && this.mode !== 64 && BigInt(target) > code.limit)
+      || (!this.addressSpace && BigInt(target) + (this.mode === 64 ? 0n : (code?.base ?? 0n)) >= BigInt(this.memory.byteLength))) {
       throw new CpuFault("Branch target outside memory", start);
     }
     this.ip = target;
@@ -402,6 +408,17 @@ export class X86Cpu {
         }
         this.#writeOperand(decoded.operand, result, width);
       }
+    } else if (opcode === 0xea) {
+      if ((this.controlRegisters.get(0) & 1n) === 0n || this.mode === 64) throw new CpuFault("Immediate far jump requires 32-bit protected mode", start);
+      const offset = this.#fetchUnsigned(operand16 ? 2 : 4);
+      const selector = Number(this.#fetchUnsigned(2));
+      try {
+        const cache = this.segments.installCodeSegment(selector);
+        if (offset > cache.limit) throw new Error("Far-jump target exceeds CS limit");
+        const linear = offset + cache.base;
+        if (linear >= BigInt(this.memory.byteLength)) throw new Error("Far-jump target exceeds guest memory");
+        this.ip = Number(offset);
+      } catch (error) { throw new CpuFault(error.message, start); }
     } else if (opcode === 0x8e || opcode === 0x8c) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       const segment = decoded.reg & 7;
