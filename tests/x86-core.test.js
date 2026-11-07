@@ -206,3 +206,39 @@ test("CPU rejects incompatible or malformed save states without changing state",
   assert.equal(cpu.ip, before.ip);
   assert.equal(cpu.halted, before.halted);
 });
+
+
+test("CPUID reports NEXARA vendor identity and only implemented base features", () => {
+  const cpu = cpuFor([0x0f,0xa2,0xf4], 64);
+  cpu.setRegister(0, 0n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(0, 32), 1n);
+  const vendor = [cpu.getRegister(3,32),cpu.getRegister(2,32),cpu.getRegister(1,32)]
+    .map(value => String.fromCharCode(...Array.from({length:4},(_,i)=>Number((value >> BigInt(i*8)) & 255n))))
+    .join("");
+  assert.equal(vendor, "NEXARA      ");
+  cpu.setRegister(0, 1n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(2, 32), 0n);
+  assert.equal(cpu.getRegister(1, 32), 0n);
+  assert.equal(cpu.getRegister(3, 32), 1n << 4n);
+});
+
+test("CPUID advertises long mode only for the 64-bit execution mode", () => {
+  const cpu64 = cpuFor([0x0f,0xa2], 64);
+  cpu64.setRegister(0, 0x80000001n, 32);
+  cpu64.step();
+  assert.equal(cpu64.getRegister(2, 32), 1n << 29n);
+  const cpu32 = cpuFor([0x0f,0xa2], 32);
+  cpu32.setRegister(0, 0x80000001n, 32);
+  cpu32.step();
+  assert.equal(cpu32.getRegister(2, 32), 0n);
+});
+
+test("RDTSC returns the deterministic instruction counter", () => {
+  const cpu = cpuFor([0x90,0x0f,0x31,0xf4], 64);
+  cpu.step();
+  cpu.step();
+  assert.equal(cpu.getRegister(0, 32), 1n);
+  assert.equal(cpu.getRegister(2, 32), 0n);
+});
