@@ -219,3 +219,62 @@ export class Pit8253 {
     this.elapsedTicks = BigInt(s.elapsedTicks);
   }
 }
+
+
+/**
+ * Minimal PC/AT I/O-port and timer-to-PIC wiring.
+ * The caller advances virtual PIT ticks and asks this fabric to queue one
+ * acknowledged PIC vector on a CPU implementing requestInterrupt(vector).
+ */
+export class PcAtInterruptFabric {
+  constructor({ pic = new Pic8259(), pit = new Pit8253() } = {}) {
+    if (!(pic instanceof Pic8259) || !(pit instanceof Pit8253)) throw new TypeError("Invalid PC interrupt devices");
+    this.pic = pic;
+    this.pit = pit;
+  }
+
+  ioWrite(port, value) {
+    if (!Number.isInteger(port) || port < 0 || port > 0xffff) throw new RangeError("Invalid I/O port");
+    if (port === 0x20 || port === 0x21 || port === 0xa0 || port === 0xa1) return this.pic.write(port, value);
+    if (port === 0x40) return this.pit.writeCounter0(value);
+    if (port === 0x43) return this.pit.writeControl(value);
+    throw new RangeError("Unmapped PC I/O port");
+  }
+
+  ioRead(port) {
+    if (port === 0x20 || port === 0x21 || port === 0xa0 || port === 0xa1) return this.pic.read(port);
+    throw new RangeError("Unmapped or unsupported PC I/O port");
+  }
+
+  advanceTicks(ticks) {
+    const pulses = this.pit.tick(ticks);
+    if (this.pit.consumeIrq()) this.pic.raise(0);
+    return pulses;
+  }
+
+  dispatchOne(cpu) {
+    if (!cpu || typeof cpu.requestInterrupt !== "function") throw new TypeError("CPU must implement requestInterrupt(vector)");
+    const next = this.pic.acknowledge();
+    if (!next) return null;
+    try {
+      cpu.requestInterrupt(next.vector);
+    } catch (error) {
+      // Preserve the acknowledged interrupt if the CPU cannot accept it.
+      this.pic.raise(next.irq);
+      this.pic.endOfInterrupt(next.irq);
+      throw error;
+    }
+    return next;
+  }
+
+  snapshot() {
+    return Object.freeze({ format: "nexara-pcat-fabric-v1", pic: this.pic.snapshot(), pit: this.pit.snapshot() });
+  }
+
+  restore(state) {
+    if (!state || state.format !== "nexara-pcat-fabric-v1") throw new TypeError("Invalid PC fabric snapshot");
+    this.pic.restore(state.pic);
+    this.pit.restore(state.pit);
+    return this.snapshot();
+  }
+}
