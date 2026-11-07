@@ -61,10 +61,12 @@ test("INT switches from ring 3 to the TSS ring-0 stack and builds the privilege 
 test("IRET restores outer-ring CS, SS, ESP, CPL and EIP", () => {
   const { cpu } = setup();
   cpu.step();
+  cpu.segments.loadData("ds", 0x10);
   cpu.step();
   assert.equal(cpu.segments.cpl, 3);
   assert.equal(cpu.segments.registers.cs.selector, 0x1b);
   assert.equal(cpu.segments.registers.ss.selector, 0x23);
+  assert.equal(cpu.segments.registers.ds.selector, 0);
   assert.equal(cpu.getRegister(4, 32), 0x1f00n);
   assert.equal(cpu.ip, 0x602);
 });
