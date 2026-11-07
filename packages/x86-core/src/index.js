@@ -836,7 +836,8 @@ export class X86Cpu {
       segments: this.segments.snapshot(),
       memory: this.memory.snapshot(),
       addressSpace: this.addressSpace ? this.addressSpace.snapshot() : null,
-      pageTableRoot: this.addressSpace?.pageTableRoot === null || !this.addressSpace ? null : this.addressSpace.pageTableRoot.toString()
+      pageTableRoot: this.addressSpace?.pageTableRoot === null || !this.addressSpace ? null : this.addressSpace.pageTableRoot.toString(),
+      legacyPaging32: this.legacyPaging32 ? this.legacyPaging32.snapshot() : null
     };
   }
 
@@ -856,7 +857,9 @@ export class X86Cpu {
       || state.memory.byteLength % 4096 !== 0
       || (this.addressSpace && !Array.isArray(state.addressSpace))
       || (state.pageTableRoot !== null && state.pageTableRoot !== undefined && (typeof state.pageTableRoot !== "string" || !/^\d+$/.test(state.pageTableRoot)))
-      || (!this.addressSpace && state.pageTableRoot != null)) {
+      || (!this.addressSpace && state.pageTableRoot != null)
+      || (this.legacyPaging32 && (!state.legacyPaging32 || state.legacyPaging32.format !== "nexara-legacy-paging32-v1"))
+      || (!this.legacyPaging32 && state.legacyPaging32 != null)) {
       throw new TypeError("Invalid or incompatible x86 CPU state");
     }
     const registers = state.registers.map(value => BigInt(value));
@@ -865,6 +868,7 @@ export class X86Cpu {
       throw new RangeError("CPU state contains out-of-range values");
     }
     this.memory.restore(state.memory);
+    if (this.legacyPaging32) this.legacyPaging32.restore(state.legacyPaging32);
     if (this.addressSpace) {
       this.addressSpace.restore(state.addressSpace);
       if (state.pageTableRoot == null) this.addressSpace.clearPageTableRoot();
