@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { GuestMemory } from "../packages/runtime/src/index.js";
 import { X86Cpu } from "../packages/x86-core/src/index.js";
 
-function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCode = false } = {}) {
-  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCode = false, paged = false } = {}) {
+  const memory = new GuestMemory({ initialPages: paged ? 5 : 2, maximumPages: paged ? 5 : 2 });
   const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x600 });
   const gdtBase = 0x100;
   const idtBase = 0x900;
@@ -40,6 +40,17 @@ function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCo
   cpu.segments.installCodeSegment(0x1b);
   cpu.setRegister(4, 0x1f00, 32);
   cpu.flags = 0x202n;
+  if (paged) {
+    // Linear 0x0000-0x1fff are user pages; 0x2000-0x2fff is supervisor-only.
+    // Page directory and page table live above the mapped test region.
+    const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
+    put32(0x3000, 0x4007);
+    put32(0x4000, 0x0007);
+    put32(0x4004, 0x1007);
+    put32(0x4008, 0x2003);
+    cpu.writeControlRegister(3, 0x3000n);
+    cpu.writeControlRegister(0, cpu.readControlRegister(0) | 0x80000000n);
+  }
   return { cpu, memory };
 }
 
@@ -103,4 +114,16 @@ test("out-of-memory TSS stack frame write leaves privilege state unchanged", () 
   assert.equal(cpu.segments.registers.cs.selector, 0x1b);
   assert.equal(cpu.segments.registers.ss.selector, 0x23);
   assert.equal(cpu.getRegister(4, 32), before);
+});
+
+test("ring-3 interrupt switches to a supervisor-only paged TSS stack", () => {
+  const { cpu, memory } = setup({ paged: true, ring0Stack: 0x2800 });
+  cpu.step();
+  assert.equal(cpu.segments.cpl, 0);
+  assert.equal(cpu.getRegister(4, 32), 0x2800n - 20n);
+  const frame = new DataView(memory.read(0x2000 + 0x7ec, 20).buffer);
+  assert.equal(frame.getUint32(0, true), 0x602);
+  assert.equal(frame.getUint32(4, true), 0x1b);
+  assert.equal(frame.getUint32(12, true), 0x1f00);
+  assert.equal(frame.getUint32(16, true), 0x23);
 });
