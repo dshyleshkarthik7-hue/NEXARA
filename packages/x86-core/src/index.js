@@ -99,7 +99,7 @@ export class X86Cpu {
         throw new CpuFault("CR0.PG requires CR0.PE", this.ip);
       }
     } else if (index === 2) {
-      if (next > 0xffffffffn) throw new CpuFault("CR2 exceeds 32-bit linear address range", this.ip);
+      if (this.mode === 32 && next > 0xffffffffn) throw new CpuFault("CR2 exceeds 32-bit linear address range", this.ip);
     } else if (index === 3) {
       if ((next & 0xfffn) !== 0n) throw new CpuFault("CR3 must be 4 KiB aligned", this.ip);
       if (next >= BigInt(this.memory.byteLength)) throw new CpuFault("CR3 exceeds guest physical memory", this.ip);
@@ -250,7 +250,7 @@ export class X86Cpu {
       }
       return this.memory.read(Number(address), length);
     } catch (error) {
-      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & 0xffffffffn);
+      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & this.#mask(this.mode));
       throw error;
     }
   }
@@ -262,7 +262,7 @@ export class X86Cpu {
         this.legacyPaging32.write(address, data, { user: this.segments.cpl === 3 });
       } else this.memory.write(Number(address), data);
     } catch (error) {
-      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & 0xffffffffn);
+      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & this.#mask(this.mode));
       throw error;
     }
   }
