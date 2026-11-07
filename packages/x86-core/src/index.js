@@ -361,6 +361,22 @@ export class X86Cpu {
       if (second >= 0x80 && second <= 0x8f) {
         const displacement = this.#fetchSigned(4);
         if (this.#condition(second & 15)) this.#branch(displacement, start);
+      } else if (second === 0xaf) {
+        const decoded = this.#decodeModRM(rex, addressWidth);
+        const signExtend = (value, bits) => {
+          const sign = 1n << BigInt(bits - 1);
+          const mask = this.#mask(bits);
+          const normalized = value & mask;
+          return (normalized & sign) !== 0n ? normalized - (1n << BigInt(bits)) : normalized;
+        };
+        const left = signExtend(this.getRegister(decoded.reg, width), width);
+        const right = signExtend(this.#readOperand(decoded.operand, width), width);
+        const product = left * right;
+        const result = product & this.#mask(width);
+        const overflow = signExtend(result, width) !== product;
+        this.flags &= ~(CF | OF);
+        if (overflow) this.flags |= CF | OF;
+        this.setRegister(decoded.reg, result, width);
       } else if (second === 0xa2) {
         // CPUID reports only the small, explicitly implemented NEXARA feature set.
         const leaf = this.getRegister(0, 32);
