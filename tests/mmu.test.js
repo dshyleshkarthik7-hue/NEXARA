@@ -133,7 +133,7 @@ test("four-level walker translates 2 MiB large pages", () => {
   };
   put64(0, 0x1000n | 7n);
   put64(0x1000, 0x2000n | 7n);
-  put64(0x2000 + 1 * 8, 0x83n); // 2 MiB present, writable, supervisor page
+  put64(0x2000 + 1 * 8, 0x1083n); // 2 MiB present, writable, PAT enabled
   memory.write(0x2345, Uint8Array.of(0x2a));
   mmu.setPageTableRoot(0n);
   assert.equal(mmu.translate(0x200000n + 0x2345n), 0x2345);
@@ -168,5 +168,5 @@ test("large-page walker rejects reserved misaligned address bits", () => {
   put64(0x1000, 0x2000n | 7n);
   put64(0x2000 + 8, 0x2000n | 0x83n); // reserved address bit in a 2 MiB leaf
   mmu.setPageTableRoot(0n);
-  assert.throws(() => mmu.translate(0x200000n), PageFault);
+  assert.throws(() => mmu.translate(0x200000n), error => error instanceof PageFault && error.reserved && (error.errorCode & 8) !== 0);
 });
