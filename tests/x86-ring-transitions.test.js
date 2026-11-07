@@ -32,6 +32,7 @@ function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCo
   memory.write(0x600, Uint8Array.of(0xcd, 0x80, 0x90));
   memory.write(0x700, Uint8Array.of(0xcf)); // IRET
   cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
   memory.write(0x504, Uint8Array.of(ring0Stack & 0xff, (ring0Stack >>> 8) & 0xff, 0, 0));
   memory.write(0x508, Uint8Array.of(kernelStackSelector & 0xff, (kernelStackSelector >>> 8) & 0xff));
   cpu.segments.setCpl(3);
@@ -90,4 +91,14 @@ test("failed privilege-stack write does not partially switch CS, SS, CPL or ESP"
 test("absent ring-3 code descriptors cannot be installed", () => {
   const { cpu } = setup({ absentKernelCode: true });
   assert.throws(() => cpu.step(), /not present|segment|interrupt/i);
+});
+
+test("out-of-memory TSS stack frame write leaves privilege state unchanged", () => {
+  const { cpu } = setup({ ring0Stack: 0x4004 });
+  const before = cpu.getRegister(4, 32);
+  assert.throws(() => cpu.step(), /guest memory|stack/i);
+  assert.equal(cpu.segments.cpl, 3);
+  assert.equal(cpu.segments.registers.cs.selector, 0x1b);
+  assert.equal(cpu.segments.registers.ss.selector, 0x23);
+  assert.equal(cpu.getRegister(4, 32), before);
 });
