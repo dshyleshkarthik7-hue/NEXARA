@@ -110,6 +110,7 @@ export class GuestAddressSpace {
   }
 
   get pageTableRoot() { return this.#pageTableRoot; }
+  clearPageTableRoot() { this.#pageTableRoot = null; this.#tlb.clear(); }
 
   #readEntry(address) {
     if (address < 0n || address + 8n > BigInt(this.memory.byteLength)) {
