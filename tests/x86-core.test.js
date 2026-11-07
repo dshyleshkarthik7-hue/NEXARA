@@ -308,3 +308,45 @@ test("supports 64-bit signed IMUL with REX.W", () => {
   cpu.step();
   assert.equal(cpu.getRegister(1,64), 0xfffffffffffffff2n);
 });
+
+
+test("F7 NOT and NEG operate on register operands with correct flag behavior", () => {
+  const notCpu = cpuFor([0xf7,0xd0], 32);
+  notCpu.setRegister(0, 0x0fn, 32);
+  const beforeFlags = notCpu.saveState().flags;
+  notCpu.step();
+  assert.equal(notCpu.getRegister(0,32), 0xfffffff0n);
+  assert.equal(notCpu.saveState().flags, beforeFlags);
+
+  const negCpu = cpuFor([0xf7,0xd8], 32);
+  negCpu.setRegister(0, 5n, 32);
+  negCpu.step();
+  assert.equal(negCpu.getRegister(0,32), 0xfffffffBn);
+  const flags = BigInt(negCpu.saveState().flags);
+  assert.equal((flags & 1n) !== 0n, true);
+  assert.equal((flags & (1n << 11n)) !== 0n, false);
+});
+
+test("F7 unsigned MUL returns low and high halves and sets overflow flags", () => {
+  const cpu = cpuFor([0xf7,0xe3], 32);
+  cpu.setRegister(0, 0xffffffffn, 32);
+  cpu.setRegister(3, 2n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(0,32), 0xfffffffen);
+  assert.equal(cpu.getRegister(2,32), 1n);
+  const flags = BigInt(cpu.saveState().flags);
+  assert.equal((flags & 1n) !== 0n, true);
+  assert.equal((flags & (1n << 11n)) !== 0n, true);
+});
+
+test("F7 signed IMUL handles negative products and signed overflow", () => {
+  const cpu = cpuFor([0xf7,0xeb], 32);
+  cpu.setRegister(0, 0xfffffffdn, 32);
+  cpu.setRegister(3, 7n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(0,32), 0xffffffe9n);
+  assert.equal(cpu.getRegister(2,32), 0xffffffffn);
+  const flags = BigInt(cpu.saveState().flags);
+  assert.equal((flags & 1n) !== 0n, false);
+  assert.equal((flags & (1n << 11n)) !== 0n, false);
+});
