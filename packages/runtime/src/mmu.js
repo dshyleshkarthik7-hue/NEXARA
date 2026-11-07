@@ -302,7 +302,7 @@ export class X86LegacyPaging32 {
 
   restore(state) {
     if (!state || state.format !== "nexara-legacy-paging32-v1"
-      || (state.cr3 !== null && (typeof state.cr3 !== "string" || !/^\\d+$/.test(state.cr3)))
+      || (state.cr3 !== null && (typeof state.cr3 !== "string" || !/^\d+$/.test(state.cr3)))
       || typeof state.pse !== "boolean" || typeof state.writeProtect !== "boolean") {
       throw new TypeError("Invalid legacy paging state");
     }
