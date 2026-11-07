@@ -363,8 +363,8 @@ export class X86Cpu {
     if (!state || state.format !== "nexara-x86-state-v1" || state.mode !== this.mode
       || !Number.isSafeInteger(state.ip) || state.ip < 0
       || !Array.isArray(state.registers) || state.registers.length !== 16
-      || !state.registers.every(value => typeof value === "string" && /^\\d+$/.test(value))
-      || typeof state.flags !== "string" || !/^\\d+$/.test(state.flags)
+      || !state.registers.every(value => typeof value === "string" && /^\d+$/.test(value))
+      || typeof state.flags !== "string" || !/^\d+$/.test(state.flags)
       || typeof state.halted !== "boolean"
       || !Number.isSafeInteger(state.instructionsExecuted) || state.instructionsExecuted < 0
       || !(state.memory instanceof Uint8Array) || state.memory.byteLength <= state.ip
