@@ -21,7 +21,7 @@
           <button class="nav-item active"><span>▤</span> Editor</button>
           <button class="nav-item"><span>⌘</span> Terminal</button>
           <div class="side-label files-label">OPEN FILES</div>
-          <button id="new-file" class="nav-item" type="button"><span>＋</span> New file</button>
+          <button id="new-file" class="nav-item" type="button" disabled><span>＋</span> New file</button>
           <div id="workspace-files" aria-label="Workspace files"></div>
           <div class="sidebar-footer"><span class="status-dot"></span> Local workspace</div>
         </aside>
@@ -29,7 +29,7 @@
           <div class="tabbar"><div class="tab active"><span class="file-dot"></span> <span id="active-filename">untitled.txt</span> <span class="tab-close">×</span></div><span class="tab-hint">NEXARA EDITOR</span></div>
           <div class="editor-wrap">
             <div class="line-numbers" id="line-numbers">1</div>
-            <textarea id="editor" spellcheck="false" aria-label="Text editor" placeholder="Start writing…"></textarea>
+            <textarea id="editor" disabled spellcheck="false" aria-label="Text editor" placeholder="Start writing…"></textarea>
           </div>
           <section class="terminal-panel">
             <div class="terminal-heading"><div><span class="terminal-symbol">›_</span> TERMINAL</div><div class="terminal-actions"><span id="terminal-status">No active session</span><button id="clear-terminal" title="Clear terminal">Clear</button></div></div>
