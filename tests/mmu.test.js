@@ -121,3 +121,52 @@ test("page-table walker rejects invalid CR3 roots and absent entries", () => {
   mmu.setPageTableRoot(0n);
   assert.throws(() => mmu.translate(0n), PageFault);
 });
+
+
+test("four-level walker translates 2 MiB large pages", () => {
+  const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
+  const mmu = new GuestAddressSpace(memory);
+  const put64 = (address, value) => {
+    const bytes = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) bytes[i] = Number((value >> BigInt(i * 8)) & 0xffn);
+    memory.write(address, bytes);
+  };
+  put64(0, 0x1000n | 7n);
+  put64(0x1000, 0x2000n | 7n);
+  put64(0x2000 + 1 * 8, 0x83n); // 2 MiB present, writable, supervisor page
+  memory.write(0x2345, Uint8Array.of(0x2a));
+  mmu.setPageTableRoot(0n);
+  assert.equal(mmu.translate(0x200000n + 0x2345n), 0x2345);
+  assert.deepEqual([...mmu.read(0x200000n + 0x2345n, 1)], [0x2a]);
+});
+
+test("four-level walker translates 1 GiB large pages", () => {
+  const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
+  const mmu = new GuestAddressSpace(memory);
+  const put64 = (address, value) => {
+    const bytes = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) bytes[i] = Number((value >> BigInt(i * 8)) & 0xffn);
+    memory.write(address, bytes);
+  };
+  put64(0, 0x1000n | 7n);
+  put64(0x1000 + 8, 0x83n); // 1 GiB present, writable large-page leaf
+  memory.write(0x3456, Uint8Array.of(0x5c));
+  mmu.setPageTableRoot(0n);
+  assert.equal(mmu.translate(0x40000000n + 0x3456n), 0x3456);
+  assert.deepEqual([...mmu.fetch(0x40000000n + 0x3456n, 1)], [0x5c]);
+});
+
+test("large-page walker rejects reserved misaligned address bits", () => {
+  const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
+  const mmu = new GuestAddressSpace(memory);
+  const put64 = (address, value) => {
+    const bytes = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) bytes[i] = Number((value >> BigInt(i * 8)) & 0xffn);
+    memory.write(address, bytes);
+  };
+  put64(0, 0x1000n | 7n);
+  put64(0x1000, 0x2000n | 7n);
+  put64(0x2000 + 8, 0x2000n | 0x83n); // reserved address bit in a 2 MiB leaf
+  mmu.setPageTableRoot(0n);
+  assert.throws(() => mmu.translate(0x200000n), PageFault);
+});
