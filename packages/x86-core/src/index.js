@@ -377,7 +377,8 @@ export class X86Cpu {
       if (![0, 2, 3, 4, 5, 6, 7].includes(extension)) throw new CpuFault("Unsupported F7 integer extension", start);
       const operand = this.#readOperand(decoded.operand, width) & this.#mask(width);
       if (extension === 0) {
-        const immediate = this.#fetchUnsigned(width === 16 ? 2 : 4);
+        let immediate = this.#fetchUnsigned(width === 16 ? 2 : 4);
+        if (width === 64 && (immediate & 0x80000000n)) immediate |= 0xffffffff00000000n;
         this.#alu("test", operand, immediate, width);
       } else {
       const mask = this.#mask(width);
