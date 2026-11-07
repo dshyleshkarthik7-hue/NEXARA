@@ -665,3 +665,26 @@ test("32-bit protected-mode far JMP loads CS and fetches through its segment cac
   assert.equal(cpu.ip, 0x11);
   assert.equal(cpu.halted, true);
 });
+
+
+test("32-bit ring-0 INT gate pushes an interrupt frame and IRET restores it", () => {
+  const cpu = cpuFor([0xcd,0x30,0xf4], 32);
+  cpu.memory.write(8, Uint8Array.from([0xff,0xff,0,0,0,0x9a,0xcf,0]));
+  cpu.memory.write(16, Uint8Array.from([0xff,0xff,0,0,0,0x92,0xcf,0]));
+  cpu.memory.write(0x80, Uint8Array.of(0xcf));
+  const gate = Uint8Array.from([0x80,0,0x08,0,0,0x8e,0,0]);
+  cpu.memory.write(0x200 + 0x30 * 8, gate);
+  cpu.idt.setRegister(0x200n, 0x30 * 8 + 7);
+  cpu.systemTables.loadIdtr(0x200n, 0x30 * 8 + 7);
+  cpu.segments.installCodeSegment(0x08);
+  cpu.segments.loadStack(0x10);
+  cpu.setRegister(4, 0xff0n, 32);
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  cpu.flags |= 1n << 9n;
+  cpu.run({ maxInstructions: 3 });
+  assert.equal(cpu.halted, true);
+  assert.equal(cpu.ip, 3);
+  assert.equal(cpu.segments.snapshot().cs.selector, 0x08);
+  assert.equal(cpu.getRegister(4, 32), 0xff0n);
+  assert.equal((cpu.flags & (1n << 9n)) !== 0n, true);
+});
