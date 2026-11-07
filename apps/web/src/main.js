@@ -15,7 +15,7 @@ let sessionToken = null;
 let socket = null;
 let workspace = null;
 let currentFile = "untitled.txt";
-let currentRevision = null;
+const fileRevisions = new Map();
 let saveTimer = null;
 let saveQueue = Promise.resolve();
 
@@ -59,10 +59,11 @@ async function openFile(path) {
     saveTimer = null;
     await saveCurrentFile();
   }
+  await saveQueue;
   const record = await workspace.read(path);
   if (!record) return;
   currentFile = record.path;
-  currentRevision = record.revision;
+  fileRevisions.set(record.path, record.revision);
   editor.value = record.content;
   document.querySelector("#active-filename").textContent = currentFile;
   updateEditorMeta();
@@ -74,13 +75,13 @@ async function saveCurrentFile() {
   if (!workspace) return;
   const content = editor.value;
   const path = currentFile;
-  const expectedRevision = currentRevision;
   saveQueue = saveQueue.then(async () => {
     try {
       setSaveStatus("Saving…");
+      const expectedRevision = fileRevisions.get(path) ?? null;
       const record = await workspace.write(path, content, { expectedRevision });
+      fileRevisions.set(path, record.revision);
       if (path === currentFile && content === editor.value) {
-        currentRevision = record.revision;
         setSaveStatus("Saved locally");
       }
       await refreshFiles();
@@ -127,6 +128,7 @@ document.querySelector("#new-file").addEventListener("click", async () => {
   if (!path) return;
   try {
     const record = await workspace.write(path, "", { expectedRevision: null });
+    fileRevisions.set(record.path, record.revision);
     await openFile(record.path);
   } catch (error) {
     window.alert(error.message);
