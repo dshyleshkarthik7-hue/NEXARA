@@ -111,6 +111,32 @@ export class X86DescriptorTable {
     return Object.freeze(descriptor);
   }
 
+  /** Decode a 32-bit protected-mode system descriptor (TSS/LDT). */
+  readSystemDescriptor(selector, { allowedTypes = [1, 2, 3, 9, 11], requirePresent = true } = {}) {
+    if (this.kind !== "gdt") throw new TypeError("System descriptors must be resolved through the GDT");
+    if (!Number.isInteger(selector) || selector <= 0 || selector > 0xffff || (selector & 4) !== 0) {
+      throw new RangeError("System descriptor selector must be a non-null GDT selector");
+    }
+    if (!Array.isArray(allowedTypes) || allowedTypes.some(type => !Number.isInteger(type) || type < 0 || type > 15)) {
+      throw new TypeError("allowedTypes must contain descriptor type nibbles");
+    }
+    const index = selector >>> 3;
+    const bytes = this.#read(index * 8, 8);
+    const access = bytes[5];
+    const type = access & 0x0f;
+    const present = (access & 0x80) !== 0;
+    if ((access & 0x10) !== 0) throw new Error("Descriptor is a code/data descriptor, not a system descriptor");
+    if (!allowedTypes.includes(type)) throw new Error("Unsupported system descriptor type");
+    if (requirePresent && !present) throw new Error("System descriptor is not present");
+    const limitLow = Number(this.#u16(bytes, 0));
+    const baseLow = this.#u16(bytes, 2);
+    const base = baseLow | (BigInt(bytes[4]) << 16n) | (BigInt(bytes[7]) << 24n);
+    let limit = BigInt(limitLow | ((bytes[6] & 0x0f) << 16));
+    if ((bytes[6] & 0x80) !== 0) limit = (limit << 12n) | 0xfffn;
+    return Object.freeze({ selector, index, type, present, dpl: (access >>> 5) & 3,
+      base, limit, available: (bytes[6] & 0x10) !== 0, raw: bytes });
+  }
+
   readGate(vector, { cpl = 0, software = false } = {}) {
     if (this.kind !== "idt") throw new TypeError("Gate lookup requires an IDT");
     if (!Number.isInteger(vector) || vector < 0 || vector > 255) throw new RangeError("Interrupt vector must be 0..255");
