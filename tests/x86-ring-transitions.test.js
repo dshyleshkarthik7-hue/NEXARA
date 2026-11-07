@@ -4,10 +4,10 @@ import { GuestMemory } from "../packages/runtime/src/index.js";
 import { X86LegacyPaging32 } from "../packages/runtime/src/mmu.js";
 import { X86Cpu } from "../packages/x86-core/src/index.js";
 
-function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCode = false, paged = false, unmappedKernelPage = false } = {}) {
+function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCode = false, paged = false, unmappedKernelPage = false, exceptionDelivery = false, doubleFaultGate = false } = {}) {
   const memory = new GuestMemory({ initialPages: paged ? 5 : 2, maximumPages: paged ? 5 : 2 });
   const paging = paged ? new X86LegacyPaging32(memory) : null;
-  const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x600, legacyPaging32: paging });
+  const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x600, legacyPaging32: paging, exceptionDelivery });
   const gdtBase = 0x100;
   const idtBase = 0x900;
   const putDescriptor = (index, { base = 0, limit = 0xfffff, access, flags = 0xc } = {}) => {
@@ -31,6 +31,12 @@ function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCo
   gate[2] = 0x08; gate[3] = 0x00;
   gate[5] = 0xee; // present, DPL3, 32-bit interrupt gate
   memory.write(idtBase + 0x80 * 8, gate);
+  const pfGate = new Uint8Array(8);
+  pfGate[0] = 0x00; pfGate[1] = 0x07;
+  pfGate[2] = 0x08; pfGate[3] = 0x00;
+  pfGate[5] = 0x8e;
+  memory.write(idtBase + 14 * 8, pfGate);
+  if (doubleFaultGate) memory.write(idtBase + 8 * 8, pfGate);
   memory.write(0x600, Uint8Array.of(0xcd, 0x80, 0x90));
   memory.write(0x700, Uint8Array.of(0xcf)); // IRET
   cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
@@ -158,4 +164,29 @@ test("preflights every page before writing a cross-page interrupt frame", () => 
   assert.equal(cpu.segments.registers.ss.selector, 0x23);
   assert.equal(cpu.getRegister(4, 32), 0x1f00n);
   assert.deepEqual(memory.read(0x1ff0, 16), before);
+});
+
+test("opt-in page-fault dispatch pushes CR2 error code and resumes at the handler", () => {
+  const { cpu, memory } = setup({ paged: true, exceptionDelivery: true });
+  cpu.setRegister(3, 0x2000n, 32);
+  memory.write(0x600, Uint8Array.of(0x8b, 0x03)); // ring-3 read from supervisor page
+  const result = cpu.step();
+  assert.equal(result.state, "exception");
+  assert.equal(result.vector, 14);
+  assert.equal(result.errorCode, 5); // present + user
+  assert.equal(cpu.readControlRegister(2), 0x2000n);
+  assert.equal(cpu.segments.cpl, 0);
+  assert.equal(cpu.ip, 0x700);
+  const frame = new DataView(memory.read(0x1800 - 24, 24).buffer);
+  assert.equal(frame.getUint32(0, true), 5);
+  assert.equal(frame.getUint32(4, true), 0x600);
+});
+
+test("failed page-fault and double-fault delivery terminates as a triple fault", () => {
+  const { cpu, memory } = setup({ paged: true, exceptionDelivery: true });
+  cpu.setRegister(3, 0x2000n, 32);
+  memory.write(0x600, Uint8Array.of(0x8b, 0x03));
+  assert.throws(() => cpu.step(), /Triple fault/);
+  assert.equal(cpu.segments.cpl, 3);
+  assert.equal(cpu.getRegister(4, 32), 0x1f00n);
 });
