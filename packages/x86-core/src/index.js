@@ -621,18 +621,20 @@ export class X86Cpu {
       const restoredFlags = view.getBigUint64(16, true);
       if (targetIp > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("IRET target exceeds interpreter address range");
       const targetCpl = selector & 3;
-      if (targetCpl === this.segments.cpl) {
+      if (targetCpl === this.segments.cpl && this.segments.registers.ss.selector !== 0) {
         const plan = this.segments.prepareCodeTransition(selector, { targetCpl, allowInward: false });
         if (!plan.cache.long || plan.cache.defaultSize) throw new Error("IRET target is not a 64-bit code segment");
         this.segments.installCodeSegment(selector);
         this.setRegister(4, rsp + 24n, 64);
-      } else if (targetCpl > this.segments.cpl) {
+      } else if (targetCpl > this.segments.cpl || this.segments.registers.ss.selector === 0) {
         if (rsp > BigInt(Number.MAX_SAFE_INTEGER - 40)) throw new Error("Outer IRET frame exceeds host address range");
         const outer = this.#readLinear(Number(rsp), 40);
         const full = new DataView(outer.buffer, outer.byteOffset, outer.byteLength);
         const outerRsp = full.getBigUint64(24, true);
         const outerSs = Number(full.getBigUint64(32, true) & 0xffffn);
-        const plan = this.segments.prepareCodeReturn(selector);
+        const plan = targetCpl > this.segments.cpl
+          ? this.segments.prepareCodeReturn(selector)
+          : this.segments.prepareCodeTransition(selector, { targetCpl, allowInward: false });
         if (!plan.cache.long || plan.cache.defaultSize) throw new Error("IRET target is not a 64-bit code segment");
         const stackDescriptor = this.segments.prepareLongModeStackReturn(outerSs, { targetCpl });
         if (outerRsp > 0xffffffffffffffffn) throw new Error("Restored RSP is outside 64-bit range");
