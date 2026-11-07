@@ -173,3 +173,47 @@ test("EFER.NXE controls execution faults for NX guest page-table entries", async
   assert.throws(() => machine.addressSpace.fetch(0x4000n, 1), error =>
     error.name === "PageFault" && error.present && error.instruction && error.reserved);
 });
+
+
+test("guest MOV CR instructions read and write CR0 CR3 and CR4", async () => {
+  const machine = await new X86InterpreterBackend().createMachine({ mode: 64, memoryPages: 2 });
+  machine.cpu.writeControlRegister(4, 1n << 5n);
+  machine.loadProgram(Uint8Array.from([0x0f,0x20,0xe0])); // mov rax, cr4
+  machine.step();
+  assert.equal(machine.getRegister(0,64), 1n << 5n);
+
+  machine.setRegister(0, 0x1000n, 64);
+  machine.loadProgram(Uint8Array.from([0x0f,0x22,0xd8])); // mov cr3, rax
+  machine.step();
+  assert.equal(machine.cpu.readControlRegister(3), 0x1000n);
+
+  machine.loadProgram(Uint8Array.from([0x0f,0x20,0xd8])); // mov rax, cr3
+  machine.step();
+  assert.equal(machine.getRegister(0,64), 0x1000n);
+});
+
+test("guest RDMSR and WRMSR access the modeled EFER register", async () => {
+  const machine = await new X86InterpreterBackend().createMachine({ mode: 64, memoryPages: 2 });
+  machine.setRegister(1, 0xc0000080n, 32); // ECX = EFER MSR
+  machine.setRegister(0, (1n << 11n) | 1n, 32);
+  machine.setRegister(2, 0n, 32);
+  machine.loadProgram(Uint8Array.from([0x0f,0x30])); // wrmsr
+  machine.step();
+  assert.equal(machine.cpu.readMsr(0xc0000080), 0x801n);
+
+  machine.setRegister(0, 0n, 32);
+  machine.loadProgram(Uint8Array.from([0x0f,0x32])); // rdmsr
+  machine.step();
+  assert.equal(machine.getRegister(0,32), 0x801n);
+  assert.equal(machine.getRegister(2,32), 0n);
+});
+
+test("guest control-register instructions reject memory forms and unsupported registers", async () => {
+  const memoryForm = await new X86InterpreterBackend().createMachine({ mode: 64, memoryPages: 1 });
+  memoryForm.loadProgram(Uint8Array.from([0x0f,0x20,0x00]));
+  assert.throws(() => memoryForm.step(), /register-direct/i);
+
+  const unsupported = await new X86InterpreterBackend().createMachine({ mode: 64, memoryPages: 1 });
+  unsupported.loadProgram(Uint8Array.from([0x0f,0x20,0xd0])); // CR2
+  assert.throws(() => unsupported.step(), /unsupported control register/i);
+});
