@@ -138,6 +138,53 @@ export class X86SegmentState {
     return this.snapshot();
   }
 
+  /** Commit a validated long-mode inward transition; SS becomes a null selector. */
+  commitLongModePrivilegeTransition(plan) {
+    if (!this.longMode || !plan || !plan.cache || !Number.isInteger(plan.targetCpl)) {
+      throw new TypeError("Invalid long-mode privilege transition plan");
+    }
+    this.cpl = plan.targetCpl;
+    this.registers.cs = { selector: plan.selector, cache: plan.cache };
+    this.registers.ss = { selector: 0, cache: null };
+    for (const name of ["ds", "es", "fs", "gs"]) {
+      const cache = this.registers[name].cache;
+      if (cache && !cache.conforming && cache.dpl < plan.targetCpl) {
+        this.registers[name] = { selector: 0, cache: null };
+      }
+    }
+    return this.snapshot();
+  }
+
+  prepareLongModeStackReturn(selector, { targetCpl } = {}) {
+    if (!this.longMode || !Number.isInteger(targetCpl) || targetCpl < 0 || targetCpl > 3) {
+      throw new TypeError("Invalid long-mode stack return");
+    }
+    if ((selector & 0xfff8) === 0) return null;
+    return this.prepareStack(selector, { targetCpl });
+  }
+
+  commitLongModeReturn(plan, stackSelector, stackDescriptor) {
+    if (!this.longMode || !plan || !plan.cache || !Number.isInteger(plan.targetCpl)) {
+      throw new TypeError("Invalid long-mode return plan");
+    }
+    if (stackDescriptor === null) {
+      if ((stackSelector & 0xfff8) !== 0) throw new Error("Null SS requires a null selector");
+    } else if (!stackDescriptor.writable || stackDescriptor.executable || !stackDescriptor.present
+      || stackDescriptor.dpl !== plan.targetCpl || (stackSelector & 3) !== plan.targetCpl) {
+      throw new Error("Outer SS must be a present writable data segment at target CPL");
+    }
+    this.cpl = plan.targetCpl;
+    this.registers.cs = { selector: plan.selector, cache: plan.cache };
+    this.registers.ss = { selector: stackSelector, cache: stackDescriptor };
+    for (const name of ["ds", "es", "fs", "gs"]) {
+      const cache = this.registers[name].cache;
+      if (cache && !cache.conforming && cache.dpl < plan.targetCpl) {
+        this.registers[name] = { selector: 0, cache: null };
+      }
+    }
+    return this.snapshot();
+  }
+
   prepareStack(selector, { targetCpl = this.cpl } = {}) {
     if (!Number.isInteger(selector) || selector < 0 || selector > 0xffff || (selector & 0xfff8) === 0) {
       throw new RangeError("Invalid target stack selector");
