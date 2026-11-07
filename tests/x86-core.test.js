@@ -219,9 +219,9 @@ test("CPUID reports NEXARA vendor identity and only implemented base features", 
   assert.equal(vendor, "NEXARA      ");
   cpu.setRegister(0, 1n, 32);
   cpu.step();
-  assert.equal(cpu.getRegister(2, 32), 0n);
   assert.equal(cpu.getRegister(1, 32), 0n);
-  assert.equal(cpu.getRegister(3, 32), 1n << 4n);
+  assert.equal(cpu.getRegister(2, 32), 1n << 4n);
+  assert.equal(cpu.getRegister(3, 32), 0n);
 });
 
 test("CPUID advertises long mode only for the 64-bit execution mode", () => {
