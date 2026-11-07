@@ -161,7 +161,7 @@ importInput.addEventListener("change", async () => {
 
 document.querySelector("#run-x86").addEventListener("click", async () => {
   try {
-    const tokens = editor.value.trim().split(/[\\s,]+/).filter(Boolean);
+    const tokens = editor.value.trim().split(/[\s,]+/).filter(Boolean);
     if (!tokens.length) throw new Error("Enter hexadecimal instruction bytes in the editor first");
     const bytes = Uint8Array.from(tokens.map(token => {
       const hex = token.toLowerCase().startsWith("0x") ? token.slice(2) : token;
@@ -173,13 +173,13 @@ document.querySelector("#run-x86").addEventListener("click", async () => {
     const machine = await backend.createMachine({ mode, memoryPages: 4 });
     machine.loadProgram(bytes);
     const result = machine.run({ maxInstructions: 100000 });
-    appendOutput(`\\r\\n[x86-${mode}] ${result.state}; ${result.instructionsExecuted} instructions; IP=0x${result.ip.toString(16)}\\r\\n`);
+    appendOutput(`\r\n[x86-${mode}] ${result.state}; ${result.instructionsExecuted} instructions; IP=0x${result.ip.toString(16)}\r\n`);
     for (const [name, value] of Object.entries(machine.state.registers)) {
       appendOutput(`${name.toUpperCase()}=0x${BigInt(value).toString(16)}  `);
     }
-    appendOutput("\\r\\n");
+    appendOutput("\r\n");
   } catch (error) {
-    appendOutput(`\\r\\n[x86 interpreter] ${error.message}\\r\\n`);
+    appendOutput(`\r\n[x86 interpreter] ${error.message}\r\n`);
   }
 });
 
