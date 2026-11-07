@@ -265,8 +265,8 @@ export class X86Cpu {
   #readLinear(address, length, { execute = false, user = this.segments.cpl === 3 } = {}) {
     try {
       if (this.addressSpace) return execute
-        ? this.addressSpace.fetch(BigInt(address), length)
-        : this.addressSpace.read(BigInt(address), length);
+        ? this.addressSpace.fetch(BigInt(address), length, { user })
+        : this.addressSpace.read(BigInt(address), length, { user });
       if (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n) {
         return this.legacyPaging32.read(address, length, { execute, user });
       }
@@ -279,7 +279,7 @@ export class X86Cpu {
 
   #writeLinear(address, data, { user = this.segments.cpl === 3 } = {}) {
     try {
-      if (this.addressSpace) this.addressSpace.write(BigInt(address), data);
+      if (this.addressSpace) this.addressSpace.write(BigInt(address), data, { user });
       else if (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n) {
         this.legacyPaging32.write(address, data, { user });
       } else this.memory.write(Number(address), data);
