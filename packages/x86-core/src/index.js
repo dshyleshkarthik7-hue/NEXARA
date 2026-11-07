@@ -23,7 +23,7 @@ export class CpuFault extends Error {
  * No CPL/ring privilege model, segmentation, interrupt delivery, FPU/SIMD, or devices.
  */
 export class X86Cpu {
-  constructor({ memory, mode = 64, instructionPointer = 0, addressSpace = null, legacyPaging32 = null } = {}) {
+  constructor({ memory, mode = 64, instructionPointer = 0, addressSpace = null, legacyPaging32 = null, ioBus = null } = {}) {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
     if (mode !== 32 && mode !== 64) throw new RangeError("mode must be 32 or 64");
     if (!Number.isSafeInteger(instructionPointer) || instructionPointer < 0
@@ -37,6 +37,8 @@ export class X86Cpu {
     this.memory = memory;
     this.addressSpace = addressSpace;
     this.legacyPaging32 = legacyPaging32;
+    if (ioBus !== null && (!ioBus || typeof ioBus.read !== "function" || typeof ioBus.write !== "function")) throw new TypeError("ioBus must implement read(port, width) and write(port, value, width)");
+    this.ioBus = ioBus;
     this.mode = mode;
     this.ip = instructionPointer;
     this.registers = Array.from({ length: 16 }, () => 0n);
@@ -359,6 +361,32 @@ export class X86Cpu {
     this.ip = target;
   }
 
+  #checkIoPermission(start) {
+    const iopl = Number((this.flags >> 12n) & 3n);
+    if (this.segments.cpl > iopl) throw new CpuFault("I/O privilege check failed (#GP); TSS I/O bitmap is not implemented", start);
+    if (!this.ioBus) throw new CpuFault("I/O instruction executed without an attached guest I/O bus", start);
+  }
+
+  #readIo(port, width, start) {
+    this.#checkIoPermission(start);
+    if (![8, 16, 32].includes(width)) throw new CpuFault("Unsupported I/O operand width", start);
+    if (!Number.isInteger(port) || port < 0 || port > 0xffff || port + width / 8 > 0x10000) throw new CpuFault("I/O port range overflow", start);
+    try {
+      const value = this.ioBus.read(port, width);
+      const result = BigInt(value);
+      if (result < 0n || result > this.#mask(width)) throw new Error("I/O bus returned a value outside operand width");
+      return result;
+    } catch (error) { throw new CpuFault("Guest I/O read failed: " + error.message, start); }
+  }
+
+  #writeIo(port, value, width, start) {
+    this.#checkIoPermission(start);
+    if (![8, 16, 32].includes(width)) throw new CpuFault("Unsupported I/O operand width", start);
+    if (!Number.isInteger(port) || port < 0 || port > 0xffff || port + width / 8 > 0x10000) throw new CpuFault("I/O port range overflow", start);
+    try { this.ioBus.write(port, BigInt(value) & this.#mask(width), width); }
+    catch (error) { throw new CpuFault("Guest I/O write failed: " + error.message, start); }
+  }
+
   #stackWidth(operandWidth) { return this.mode === 64 ? 64 : operandWidth; }
   #push(value, width) {
     const bytes = width / 8;
@@ -435,7 +463,15 @@ export class X86Cpu {
     const width = (rex & 8) ? 64 : (operand16 ? 16 : 32);
     const addressWidth = this.mode === 64 && !address32 ? 64 : 32;
 
-    if (opcode === 0xcd || opcode === 0xcc) {
+    if (opcode === 0xe4 || opcode === 0xe5 || opcode === 0xe6 || opcode === 0xe7
+      || opcode === 0xec || opcode === 0xed || opcode === 0xee || opcode === 0xef) {
+      const byteOperation = [0xe4, 0xe6, 0xec, 0xee].includes(opcode);
+      const input = [0xe4, 0xe5, 0xec, 0xed].includes(opcode);
+      const port = opcode >= 0xec ? Number(this.getRegister(2, 16)) : this.#fetch8();
+      const ioWidth = byteOperation ? 8 : (this.mode === 64 && !operand16 ? 32 : width);
+      if (input) this.setRegister(0, this.#readIo(port, ioWidth, start), ioWidth);
+      else this.#writeIo(port, this.getRegister(0, ioWidth), ioWidth, start);
+    } else if (opcode === 0xcd || opcode === 0xcc) {
       const vector = opcode === 0xcc ? 3 : this.#fetch8();
       this.#deliverSoftwareInterrupt(vector, this.ip, start);
     } else if (opcode === 0xcf) {
