@@ -1,8 +1,8 @@
 import { GuestMemory } from "../../runtime/src/index.js";
 
 const REG_NAMES = ["rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15"];
-const CF = 1n, ZF = 1n << 6n, SF = 1n << 7n, OF = 1n << 11n;
-const ARITH_FLAGS = CF | ZF | SF | OF;
+const CF = 1n, PF = 1n << 2n, ZF = 1n << 6n, SF = 1n << 7n, OF = 1n << 11n;
+const ARITH_FLAGS = CF | PF | ZF | SF | OF;
 
 export class CpuFault extends Error {
   constructor(message, ip) {
@@ -153,6 +153,9 @@ export class X86Cpu {
     const r = result & mask;
     this.flags &= ~ARITH_FLAGS;
     if (r === 0n) this.flags |= ZF;
+    let parity = Number(r & 0xffn), ones = 0;
+    while (parity) { ones ^= 1; parity &= parity - 1; }
+    if (ones === 0) this.flags |= PF;
     if (r & sign) this.flags |= SF;
     if (operation === "add") {
       if (a + b > mask) this.flags |= CF;
@@ -176,6 +179,7 @@ export class X86Cpu {
     const zf = (this.flags & ZF) !== 0n;
     const sf = (this.flags & SF) !== 0n;
     const of = (this.flags & OF) !== 0n;
+    const pf = (this.flags & PF) !== 0n;
     switch (code & 15) {
       case 0: return of;
       case 1: return !of;
@@ -187,8 +191,8 @@ export class X86Cpu {
       case 7: return !cf && !zf;
       case 8: return sf;
       case 9: return !sf;
-      case 10: return false; // parity flag not modelled in this subset
-      case 11: return true;
+      case 10: return pf;
+      case 11: return !pf;
       case 12: return sf !== of;
       case 13: return sf === of;
       case 14: return zf || sf !== of;
@@ -210,9 +214,9 @@ export class X86Cpu {
     const bytes = width / 8;
     const stackReg = 4;
     const next = this.getRegister(stackReg, this.mode) - BigInt(bytes);
-    this.setRegister(stackReg, next, this.mode);
     const address = this.#address(next, this.mode);
     this.#writeOperand({ kind: "memory", address }, value, width);
+    this.setRegister(stackReg, next, this.mode);
   }
   #pop(width) {
     const stackReg = 4;
@@ -286,7 +290,10 @@ export class X86Cpu {
       if (opcode === 0xe8) this.#push(BigInt(this.ip), this.#stackWidth(width));
       this.#branch(displacement, start);
     } else if (opcode === 0xc3) {
-      this.#branch(BigInt(this.#pop(this.#stackWidth(width))), start);
+      const target = this.#pop(this.#stackWidth(width));
+      const normalized = target & this.#mask(this.mode);
+      if (normalized >= BigInt(this.memory.byteLength)) throw new CpuFault("Return target outside memory", start);
+      this.ip = Number(normalized);
     } else if (opcode >= 0x70 && opcode <= 0x7f) {
       const displacement = this.#fetchSigned(1);
       if (this.#condition(opcode & 15)) this.#branch(displacement, start);
