@@ -361,18 +361,19 @@ export class X86Cpu {
 
   loadState(state) {
     if (!state || state.format !== "nexara-x86-state-v1" || state.mode !== this.mode
-      || !Number.isSafeInteger(state.ip) || state.ip < 0 || state.ip >= this.memory.byteLength
+      || !Number.isSafeInteger(state.ip) || state.ip < 0
       || !Array.isArray(state.registers) || state.registers.length !== 16
       || !state.registers.every(value => typeof value === "string" && /^\\d+$/.test(value))
       || typeof state.flags !== "string" || !/^\\d+$/.test(state.flags)
       || typeof state.halted !== "boolean"
       || !Number.isSafeInteger(state.instructionsExecuted) || state.instructionsExecuted < 0
-      || !(state.memory instanceof Uint8Array)) {
+      || !(state.memory instanceof Uint8Array) || state.memory.byteLength <= state.ip
+      || state.memory.byteLength % 4096 !== 0) {
       throw new TypeError("Invalid or incompatible x86 CPU state");
     }
     const registers = state.registers.map(value => BigInt(value));
     const flags = BigInt(state.flags);
-    if (registers.some(value => value > this.#mask(64)) || flags > this.#mask(64)) {
+    if (registers.some(value => value > this.#mask(this.mode)) || flags > this.#mask(64)) {
       throw new RangeError("CPU state contains out-of-range values");
     }
     this.memory.restore(state.memory);
