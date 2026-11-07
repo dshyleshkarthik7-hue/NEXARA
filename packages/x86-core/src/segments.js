@@ -84,8 +84,11 @@ export class X86SegmentState {
    */
   prepareCodeTransition(selector, { targetCpl = selector & 3, allowInward = false } = {}) {
     if (!Number.isInteger(targetCpl) || targetCpl < 0 || targetCpl > 3) throw new RangeError("Target CPL must be 0..3");
-    const descriptor = this.#resolve(selector);
-    if (!descriptor.executable || !descriptor.present || descriptor.conforming) {
+    if (!Number.isInteger(selector) || selector < 0 || selector > 0xffff || (selector & 0xfff8) === 0) {
+      throw new RangeError("Invalid target code selector");
+    }
+    const descriptor = this.#table(selector).readSegment(selector, { cpl: 0 });
+    if (!descriptor || descriptor.system || !descriptor.executable || !descriptor.present || descriptor.conforming) {
       throw new Error("Interrupt target must be a present non-conforming code segment");
     }
     if (descriptor.dpl !== targetCpl || (selector & 3) !== targetCpl) {
@@ -93,6 +96,21 @@ export class X86SegmentState {
     }
     if (targetCpl > this.cpl || (!allowInward && targetCpl !== this.cpl)) {
       throw new Error("Invalid code-segment privilege transition");
+    }
+    return Object.freeze({ selector, targetCpl, cache: descriptor });
+  }
+
+  /** Validate an IRET return to a less privileged ring without mutation. */
+  prepareCodeReturn(selector) {
+    if (!Number.isInteger(selector) || selector < 0 || selector > 0xffff || (selector & 0xfff8) === 0) {
+      throw new RangeError("Invalid IRET code selector");
+    }
+    const targetCpl = selector & 3;
+    if (targetCpl <= this.cpl) throw new Error("IRET outer return must target a less privileged ring");
+    const descriptor = this.#table(selector).readSegment(selector, { cpl: 0 });
+    if (!descriptor || descriptor.system || !descriptor.executable || !descriptor.present || descriptor.conforming
+      || descriptor.dpl !== targetCpl) {
+      throw new Error("IRET target must be a present non-conforming code segment with matching RPL/DPL");
     }
     return Object.freeze({ selector, targetCpl, cache: descriptor });
   }
