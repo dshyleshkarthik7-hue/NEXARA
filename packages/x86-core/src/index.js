@@ -315,6 +315,11 @@ export class X86Cpu {
         }
         this.#writeOperand(decoded.operand, result, width);
       }
+    } else if (opcode === 0x63 && this.mode === 64 && (rex & 8)) {
+      const decoded = this.#decodeModRM(rex, addressWidth);
+      const raw = this.#readOperand(decoded.operand, 32);
+      const value = (raw & 0x80000000n) !== 0n ? raw - 0x100000000n : raw;
+      this.setRegister(decoded.reg, value, 64);
     } else if (opcode === 0x8d) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       if (decoded.operand.kind !== "memory") throw new CpuFault("LEA requires a memory addressing form", start);
