@@ -11,6 +11,7 @@ NEXARA combines a lightweight editor, browser terminal client, server session ga
 - Per-session random credentials, constant-time credential comparison, WebSocket origin allowlisting, bounded input, and a configurable session ceiling.
 - Reduced environment inheritance for spawned shells.
 - Shared client/server protocol and a bounds-checked guest-memory primitive with snapshots.
+- Experimental x86 interpreter with a limited 32/64-bit integer instruction subset, bounded execution, and validated CPU-plus-memory save-state restoration.
 - Automated protocol and memory-boundary tests.
 
 ## Requirements and run
