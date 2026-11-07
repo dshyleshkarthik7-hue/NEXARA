@@ -123,7 +123,12 @@ export class X86DescriptorTable {
     const type = attributes & 0x0f;
     const dpl = (attributes >>> 5) & 3;
     const present = (attributes & 0x80) !== 0;
-    if (![0x5, 0x6, 0x7, 0xe, 0xf].includes(type)) throw new RangeError("Invalid IDT gate type");
+    const validTypes = this.longMode ? [0xe, 0xf] : [0x5, 0x6, 0x7, 0xe, 0xf];
+    if (!validTypes.includes(type)) throw new RangeError("Invalid IDT gate type");
+    if (this.longMode && ((bytes[4] & 0xf8) !== 0 || bytes[12] !== 0 || bytes[13] !== 0 || bytes[14] !== 0 || bytes[15] !== 0)) {
+      throw new RangeError("Reserved 64-bit IDT gate fields must be zero");
+    }
+    if (!this.longMode && bytes[4] !== 0) throw new RangeError("Reserved 32-bit IDT gate byte must be zero");
     if (software && cpl > dpl) throw new Error("IDT gate privilege check failed");
     if (!present) throw new Error("Gate-not-present fault");
     if (selector === 0) throw new RangeError("IDT gate has a null code selector");
