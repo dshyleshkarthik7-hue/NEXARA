@@ -42,6 +42,7 @@ npm start
 - `apps/server`: HTTP API and authenticated PTY/WebSocket session host with bounded session lifecycle controls.
 - `packages/protocol`: versioned and validated client/server messages.
 - `packages/runtime`: execution-backend contract and guest-memory primitives.
+- `packages/x86-core`: bounded x86 interpreter and browser-compatible execution-backend adapter.
 - `packages/workspace`: IndexedDB persistence and an in-memory test adapter.
 - `tests`: protocol, memory, CPU-subset, workspace persistence, and session lifecycle tests.
 
@@ -73,4 +74,4 @@ No license has been selected yet. All rights reserved by default; do not assume 
 
 ### x86 execution core status
 
-The repository contains an experimental, deliberately bounded instruction interpreter in `packages/x86-core`. Its tested subset includes NOP, HLT, selected register/immediate MOV operations, selected base-register memory operands, LEA, ADD/SUB/AND/OR/XOR/CMP/TEST forms, immediate group-1 arithmetic, stack push/pop, CALL/RET, relative jumps, selected conditional branches, and CPU-plus-memory save-state restoration. It uses the shared guest-memory primitive and an instruction budget. It does not implement the complete x86 ISA or addressing forms, byte-register encoding rules, segmentation, paging, privilege levels, interrupts, descriptor tables, floating point/SIMD, system instructions, firmware, devices, or Linux boot. It must not be described as full x86 compatibility.
+The repository contains an experimental, deliberately bounded instruction interpreter and runtime adapter in `packages/x86-core`. The adapter creates 32-bit or 64-bit guest machines, loads bounded bytecode programs, runs them under an instruction budget, and saves/restores CPU plus memory state. Its tested subset includes NOP, HLT, selected register/immediate MOV operations, selected base-register memory operands, LEA, ADD/SUB/AND/OR/XOR/CMP/TEST forms, immediate group-1 arithmetic, stack push/pop, CALL/RET, relative jumps, selected conditional branches, and CPU-plus-memory save-state restoration. It uses the shared guest-memory primitive and an instruction budget. It does not implement the complete x86 ISA or addressing forms, byte-register encoding rules, segmentation, paging, privilege levels, interrupts, descriptor tables, floating point/SIMD, system instructions, firmware, devices, or Linux boot. It must not be described as full x86 compatibility.
