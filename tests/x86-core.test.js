@@ -373,3 +373,37 @@ test("64-bit immediate IMUL sign-extends its 32-bit immediate", () => {
   cpu.step();
   assert.equal(cpu.getRegister(1,64), 0xfffffffffffffffdn);
 });
+
+
+test("F7 unsigned DIV writes quotient and remainder", () => {
+  const cpu = cpuFor([0xf7,0xf3], 32);
+  cpu.setRegister(0, 100n, 32);
+  cpu.setRegister(2, 0n, 32);
+  cpu.setRegister(3, 7n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(0,32), 14n);
+  assert.equal(cpu.getRegister(2,32), 2n);
+});
+
+test("F7 signed IDIV truncates toward zero and preserves signed remainder", () => {
+  const cpu = cpuFor([0xf7,0xfb], 32);
+  cpu.setRegister(0, 0xffffff9cn, 32);
+  cpu.setRegister(2, 0xffffffffn, 32);
+  cpu.setRegister(3, 7n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(0,32), 0xfffffff2n);
+  assert.equal(cpu.getRegister(2,32), 0xfffffffen);
+});
+
+test("F7 DIV faults on zero divisor and quotient overflow", () => {
+  const zero = cpuFor([0xf7,0xf3], 32);
+  zero.setRegister(0, 10n, 32);
+  zero.setRegister(3, 0n, 32);
+  assert.throws(() => zero.step(), /divide by zero/i);
+
+  const overflow = cpuFor([0xf7,0xf3], 32);
+  overflow.setRegister(0, 0n, 32);
+  overflow.setRegister(2, 1n, 32);
+  overflow.setRegister(3, 1n, 32);
+  assert.throws(() => overflow.step(), /quotient overflow/i);
+});
