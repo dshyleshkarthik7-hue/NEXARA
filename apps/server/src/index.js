@@ -1,24 +1,23 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import os from "node:os";
 import pty from "node-pty";
 import { isClientMessage } from "../../../packages/protocol/src/index.js";
+import { SessionRegistry } from "./session-registry.js";
 
 const app = Fastify({ logger: true, bodyLimit: 16 * 1024 });
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || "127.0.0.1";
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || "http://localhost:5173").split(",").map(s => s.trim()).filter(Boolean));
 const maxSessions = Math.max(1, Number.parseInt(process.env.NEXARA_MAX_SESSIONS || "4", 10) || 4);
-const sessions = new Map();
-
-function tokenMatches(expected, supplied) {
-  if (typeof supplied !== "string") return false;
-  const left = Buffer.from(expected);
-  const right = Buffer.from(supplied);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
+const registry = new SessionRegistry({
+  maxSessions,
+  maxSessionsPerOwner: Math.max(1, Number.parseInt(process.env.NEXARA_MAX_SESSIONS_PER_CLIENT || "2", 10) || 2),
+  createLimit: Math.max(1, Number.parseInt(process.env.NEXARA_SESSION_CREATE_LIMIT || "8", 10) || 8),
+  idleTimeoutMs: Math.max(60_000, Number.parseInt(process.env.NEXARA_SESSION_IDLE_MS || "1800000", 10) || 1800000)
+});
 
 function originAllowed(origin) {
   // Non-browser clients may omit Origin; browser clients must match the allowlist.
@@ -34,11 +33,6 @@ function shellEnvironment() {
   env.TERM = "xterm-256color";
   env.HOME ||= os.homedir();
   return env;
-}
-
-function getAuthorizedSession(id, token) {
-  const entry = sessions.get(id);
-  return entry && tokenMatches(entry.token, token) ? entry : null;
 }
 
 await app.register(cors, {
@@ -58,7 +52,7 @@ app.get("/api/capabilities", async () => ({
 }));
 
 app.post("/api/sessions", async (request, reply) => {
-  if (sessions.size >= maxSessions) return reply.code(429).send({ error: "Session capacity reached" });
+  if (!registry.canCreate(request.ip)) return reply.code(429).send({ error: "Session creation limit or capacity reached" });
   const shell = process.env.NEXARA_SHELL || process.env.SHELL || (process.platform === "win32" ? "powershell.exe" : "/bin/sh");
   const id = randomUUID();
   const token = randomBytes(32).toString("base64url");
@@ -75,8 +69,14 @@ app.post("/api/sessions", async (request, reply) => {
     request.log.error(error, "Unable to start PTY process");
     return reply.code(500).send({ error: "Unable to start terminal process" });
   }
-  sessions.set(id, { session, token, createdAt: Date.now() });
-  session.onExit(() => sessions.delete(id));
+  try {
+    registry.add(id, { session, token, owner: request.ip });
+  } catch (error) {
+    session.kill();
+    request.log.error(error, "Unable to register PTY session");
+    return reply.code(429).send({ error: "Session capacity reached" });
+  }
+  session.onExit(() => registry.remove(id));
   return reply.code(201).send({ id, token, websocketPath: `/api/sessions/${id}/stream` });
 });
 
@@ -86,13 +86,14 @@ app.get("/api/sessions/:id/stream", { websocket: true }, (socket, request) => {
     socket.close(1008, "Origin not allowed");
     return;
   }
-  const entry = getAuthorizedSession(request.params.id, request.query?.token);
+  const entry = registry.authorize(request.params.id, request.query?.token);
   if (!entry) {
     socket.close(1008, "Invalid session credentials");
     return;
   }
   const { session } = entry;
   const onData = session.onData(data => {
+    registry.touch(request.params.id);
     if (socket.readyState !== 1) return;
     if (socket.bufferedAmount > 1024 * 1024) {
       socket.close(1013, "Client is not reading terminal output");
@@ -108,6 +109,7 @@ app.get("/api/sessions/:id/stream", { websocket: true }, (socket, request) => {
     let message;
     try { message = JSON.parse(raw.toString()); } catch { return; }
     if (!isClientMessage(message)) return;
+    registry.touch(request.params.id);
     if (message.type === "input") session.write(message.data);
     if (message.type === "resize") session.resize(message.cols, message.rows);
   });
@@ -116,16 +118,19 @@ app.get("/api/sessions/:id/stream", { websocket: true }, (socket, request) => {
 });
 
 app.delete("/api/sessions/:id", async (request, reply) => {
-  const entry = getAuthorizedSession(request.params.id, request.headers["x-session-token"]);
+  const entry = registry.authorize(request.params.id, request.headers["x-session-token"]);
   if (!entry) return reply.code(404).send({ error: "Session not found" });
   entry.session.kill();
-  sessions.delete(request.params.id);
+  registry.remove(request.params.id);
   return reply.code(204).send();
 });
 
+const idleSweep = setInterval(() => registry.sweepIdle(), 60_000);
+idleSweep.unref?.();
+
 app.addHook("onClose", async () => {
-  for (const { session } of sessions.values()) session.kill();
-  sessions.clear();
+  clearInterval(idleSweep);
+  registry.closeAll();
 });
 
 try {
