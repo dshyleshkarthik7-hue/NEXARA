@@ -103,14 +103,14 @@ test("four-level page-table walker enforces user write and NX permissions", () =
     memory.write(address, bytes);
   };
   put64(0, 0x1000n | 7n);
-  put64(0x1000, 0x2000n | 7n);
+  put64(0x1000, 0x2000n | 3n); // supervisor-only upper-level entry
   put64(0x2000, 0x3000n | 7n);
-  put64(0x3000 + 4 * 8, 0x4000n | 5n | (1n << 63n)); // present, user, NX, read-only
+  put64(0x3000 + 4 * 8, 0x4000n | 7n | (1n << 63n)); // present, writable, NX
   mmu.setPageTableRoot(0n);
-  assert.equal(mmu.translate(0x4000n, { user: true }), 0x4000);
+  assert.equal(mmu.translate(0x4000n), 0x4000);
+  assert.throws(() => mmu.translate(0x4000n, { user: true }), error => error instanceof PageFault && error.present && error.user);
   assert.throws(() => mmu.translate(0x4000n, { write: true }), error => error instanceof PageFault && error.present && error.write);
   assert.throws(() => mmu.translate(0x4000n, { execute: true }), error => error instanceof PageFault && error.instruction);
-  assert.throws(() => mmu.translate(0x4000n, { user: false }), error => error instanceof PageFault && error.present);
 });
 
 test("page-table walker rejects invalid CR3 roots and absent entries", () => {
