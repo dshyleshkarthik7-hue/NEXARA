@@ -12,7 +12,7 @@ NEXARA combines a lightweight editor, browser terminal client, server session ga
 - Per-session random credentials, constant-time credential comparison, WebSocket origin allowlisting, bounded input, and a configurable session ceiling.
 - Reduced environment inheritance for spawned shells.
 - PTY session registry with per-client active-session quotas, session-creation rate limits, constant-time per-session credential checks, idle expiry, and shutdown cleanup.
-- Shared client/server protocol, bounded guest-memory primitive with snapshots, and a software-managed 48-bit virtual address space with page mappings, permission checks, cross-page access, and x86-style page-fault error codes.
+- Shared client/server protocol, bounded guest-memory primitive with snapshots, and a 48-bit virtual address space with software mappings and an optional four-level x86-64 page-table walker, permission checks, cross-page access, CR3 root selection, and x86-style page-fault error codes.
 - Experimental x86 interpreter with a limited 32/64-bit integer instruction subset, including byte arithmetic and multiply/divide groups, byte/word sign- and zero-extension, common shifts, signed IMUL, and bounded DIV/IDIV, conservative CPUID feature/vendor reporting, deterministic RDTSC, bounded execution, and validated CPU-plus-memory save-state restoration.
 - Automated protocol, memory-boundary, CPU-subset, save-state, and workspace-storage tests.
 
@@ -56,7 +56,7 @@ The ZIP is written to `dist/NEXARA-package.zip`. On a fresh machine, extract it,
 
 ## Compatibility status
 
-NEXARA does **not** yet provide full x86 32-bit or x86-64 machine compatibility. The optional software MMU mode now routes CPU instruction fetches, memory operands, and stack accesses through virtual-to-physical mappings with read/write/execute/user permission checks. It remains a software-managed mapping layer: it does not emulate hardware page-table walks, CR3, TLB shootdowns, privilege transitions, or hardware exception delivery. Full compatibility requires instruction execution, privilege and exception semantics, virtual memory, interrupt/timer behavior, firmware and device models, storage, networking, boot support, and Linux ABI conformance. Server PTY sessions execute programs supported by the host OS; they are not virtual machines.
+NEXARA does **not** yet provide full x86 32-bit or x86-64 machine compatibility. The optional MMU mode routes CPU instruction fetches, memory operands, and stack accesses through translation. It supports both direct software mappings and a four-level 48-bit x86-64 page-table walk using guest-physical page-table entries, a configurable CR3 root, present/read-write/user/NX checks, and 4 KiB pages. This remains a partial model: it does not implement large pages, physical-address extensions, CR0/CR4/EFER control semantics, PCID, hardware TLB behavior, privilege transitions, or hardware exception delivery. Full compatibility requires instruction execution, privilege and exception semantics, virtual memory, interrupt/timer behavior, firmware and device models, storage, networking, boot support, and Linux ABI conformance. Server PTY sessions execute programs supported by the host OS; they are not virtual machines.
 
 Compatibility and performance claims will be made only against reproducible conformance suites and benchmarks.
 
