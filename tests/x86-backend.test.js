@@ -128,6 +128,7 @@ test("EFER LME activates modeled LMA only with PAE paging and controls NX", asyn
   assert.equal((cpu.readMsr(0xc0000080) & (1n << 11n)) !== 0n, true);
   assert.equal(machine.addressSpace.pageTableRoot, 0n);
   assert.throws(() => cpu.writeMsr(0xc0000080, 1n << 10n), /reserved or read-only/i);
+  assert.throws(() => cpu.writeMsr(0xc0000080, 1n << 11n), /cannot clear EFER.LME/i);
 });
 
 test("control registers and EFER survive save-state restore", async () => {
