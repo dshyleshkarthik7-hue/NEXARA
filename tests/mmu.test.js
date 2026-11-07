@@ -195,8 +195,8 @@ test("legacy 32-bit paging enforces user, write-protect and supervisor override"
   const { X86LegacyPaging32 } = await import("../packages/runtime/src/mmu.js");
   const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
   const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
-  put32(0, 0x1000 | 3);
-  put32(0x1000, 0x2000 | 3); // supervisor, read-only at both levels
+  put32(0, 0x1000 | 1);
+  put32(0x1000, 0x2000 | 1); // supervisor, read-only at both levels
   const paging = new X86LegacyPaging32(memory, { writeProtect: true });
   paging.loadCr3(0);
   assert.throws(() => paging.translate(0, { user:true }), error => error instanceof PageFault && error.present && error.user);
