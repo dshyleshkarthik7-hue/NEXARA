@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10131b" />
+    <meta name="description" content="NEXARA — a unified browser and server computing workspace." />
+    <title>NEXARA Workspace</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <a class="brand" href="#"><span class="brand-mark">N</span><span>NEXARA</span></a>
+        <div class="top-meta"><span class="status-dot"></span><span id="connection-label">Connecting to host</span></div>
+        <button id="new-session" class="primary-button">New terminal</button>
+      </header>
+      <main class="workspace">
+        <aside class="sidebar">
+          <div class="side-label">WORKSPACE</div>
+          <button class="nav-item active"><span>▤</span> Editor</button>
+          <button class="nav-item"><span>⌘</span> Terminal</button>
+          <div class="side-label files-label">OPEN FILES</div>
+          <button class="file-item active"><span>◈</span> untitled.txt</button>
+          <div class="sidebar-footer"><span class="status-dot"></span> Local workspace</div>
+        </aside>
+        <section class="main-area">
+          <div class="tabbar"><div class="tab active"><span class="file-dot"></span> untitled.txt <span class="tab-close">×</span></div><span class="tab-hint">NEXARA EDITOR</span></div>
+          <div class="editor-wrap">
+            <div class="line-numbers" id="line-numbers">1</div>
+            <textarea id="editor" spellcheck="false" aria-label="Text editor" placeholder="Start writing…"></textarea>
+          </div>
+          <section class="terminal-panel">
+            <div class="terminal-heading"><div><span class="terminal-symbol">›_</span> TERMINAL</div><div class="terminal-actions"><span id="terminal-status">No active session</span><button id="clear-terminal" title="Clear terminal">Clear</button></div></div>
+            <div id="terminal-output" class="terminal-output" role="log" aria-live="polite"><div class="welcome">NEXARA host terminal <span>·</span> Create a session to begin</div></div>
+            <form id="terminal-form" class="terminal-input-row"><span>›</span><input id="terminal-input" autocomplete="off" spellcheck="false" placeholder="Terminal input…" disabled /><button type="submit" disabled id="send-input">Send</button></form>
+          </section>
+          <footer class="statusbar"><span>Plain Text</span><span id="cursor-position">Ln 1, Col 1</span><span>UTF-8</span><span>Spaces: 2</span></footer>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
