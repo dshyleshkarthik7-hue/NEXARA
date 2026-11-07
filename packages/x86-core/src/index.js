@@ -419,24 +419,70 @@ export class X86Cpu {
     return value;
   }
 
+  #writeInterruptFrame(linearAddress, values, start) {
+    const frame = new Uint8Array(values.length * 4);
+    const view = new DataView(frame.buffer);
+    values.forEach((value, index) => view.setUint32(index * 4, Number(BigInt(value) & 0xffffffffn), true));
+    this.#writeLinear(linearAddress, frame);
+  }
+
   #deliverSoftwareInterrupt(vector, returnIp, start, software = true) {
-    if (this.mode !== 32) throw new CpuFault("Software interrupt delivery currently supports 32-bit mode only", start);
-    let gate;
+    if (this.mode !== 32) throw new CpuFault("Protected interrupt delivery currently supports 32-bit mode only", start);
     try {
-      gate = this.idt.readGate(vector, { cpl: this.segments.cpl, software });
+      const oldCpl = this.segments.cpl;
+      const gate = this.idt.readGate(vector, { cpl: oldCpl, software });
       if (gate.taskGate) throw new Error("Task gates are not supported");
-      const target = this.gdt.readSegment(gate.selector, { cpl: this.segments.cpl });
-      if (!target || !target.executable || !target.present) throw new Error("Interrupt target is not a present code segment");
-      if (target.dpl !== this.segments.cpl || (gate.selector & 3) !== this.segments.cpl) {
-        throw new Error("Interrupt privilege stack switching is not implemented");
+      const target = this.gdt.readSegment(gate.selector, { cpl: 0 });
+      if (!target || !target.executable || !target.present || target.conforming) {
+        throw new Error("Interrupt target must be a present non-conforming code segment");
       }
+      const targetCpl = target.dpl;
+      const plan = this.segments.prepareCodeTransition(gate.selector, { targetCpl, allowInward: true });
       if (gate.offset > target.limit || target.base + gate.offset >= BigInt(this.memory.byteLength)) {
         throw new Error("Interrupt target exceeds code segment or guest memory");
       }
-      this.#push(this.flags, 32);
-      this.#push(BigInt(this.segments.registers.cs.selector), 32);
-      this.#push(BigInt(returnIp), 32);
-      this.segments.installCodeSegment(gate.selector);
+      const oldCs = this.segments.registers.cs.selector;
+      const oldSs = this.segments.registers.ss.selector;
+      const oldEsp = Number(this.getRegister(4, 32));
+      const oldFlags = this.flags;
+      let nextEsp, nextSs, frameValues, stackDescriptor;
+
+      if (targetCpl < oldCpl) {
+        if (targetCpl !== 0 && targetCpl !== 1 && targetCpl !== 2) throw new Error("Unsupported target privilege ring");
+        const task = this.systemTables.task;
+        if (!task.usable || !task.present || !task.busy || task.limit < 0x67) {
+          throw new Error("Privilege transition requires a present busy 32-bit TSS");
+        }
+        const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit });
+        const ringStack = tss.getRingStack(targetCpl);
+        nextSs = ringStack.ss;
+        stackDescriptor = this.segments.prepareStack(nextSs, { targetCpl });
+        const top = BigInt(ringStack.esp);
+        const frameBytes = 20n;
+        if (top < frameBytes) throw new Error("TSS privilege stack underflows");
+        nextEsp = top - frameBytes;
+        if (nextEsp > stackDescriptor.limit || top - 1n > stackDescriptor.limit) throw new Error("TSS privilege stack exceeds SS limit");
+        if (this.addressSpace || (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n)) {
+          throw new Error("Ring stack switch with paging is not yet supported by this interpreter");
+        }
+        const linear = stackDescriptor.base + nextEsp;
+        if (linear + frameBytes > BigInt(this.memory.byteLength)) throw new Error("TSS privilege stack exceeds guest memory");
+        frameValues = [BigInt(returnIp), BigInt(oldCs), oldFlags, BigInt(oldEsp), BigInt(oldSs)];
+        this.#writeInterruptFrame(Number(linear), frameValues, start);
+        this.segments.commitPrivilegeTransition(plan, nextSs, stackDescriptor);
+      } else {
+        if (targetCpl !== oldCpl) throw new Error("Interrupt cannot transfer to an outer privilege ring");
+        stackDescriptor = this.segments.registers.ss.cache;
+        if (!stackDescriptor || oldEsp < 12 || BigInt(oldEsp) > stackDescriptor.limit) throw new Error("Current interrupt stack is invalid");
+        nextEsp = BigInt(oldEsp - 12);
+        if (nextEsp + 11n > stackDescriptor.limit) throw new Error("Interrupt frame exceeds SS limit");
+        const linear = stackDescriptor.base + nextEsp;
+        if (linear + 12n > BigInt(this.memory.byteLength)) throw new Error("Interrupt frame exceeds guest memory");
+        frameValues = [BigInt(returnIp), BigInt(oldCs), oldFlags];
+        this.#writeInterruptFrame(Number(linear), frameValues, start);
+        this.segments.installCodeSegment(gate.selector);
+      }
+      this.setRegister(4, nextEsp, 32);
       this.ip = Number(gate.offset);
       if (gate.interruptGate) this.flags &= ~(1n << 9n);
       this.flags &= ~(1n << 8n);
@@ -445,13 +491,36 @@ export class X86Cpu {
 
   #returnFromInterrupt(start) {
     if (this.mode !== 32) throw new CpuFault("IRET currently supports 32-bit mode only", start);
-    const targetOffset = this.#pop(32);
-    const selector = Number(this.#pop(32) & 0xffffn);
-    const restoredFlags = this.#pop(32);
     try {
-      const cache = this.segments.installCodeSegment(selector);
-      if (targetOffset > cache.limit || cache.base + targetOffset >= BigInt(this.memory.byteLength)) {
-        throw new Error("IRET target exceeds code segment or guest memory");
+      const stack = this.segments.registers.ss.cache;
+      const esp = this.getRegister(4, 32);
+      if (!stack || esp + 11n > stack.limit) throw new Error("IRET frame exceeds current SS limit");
+      const linear = stack.base + esp;
+      const frame = this.#readLinear(Number(linear), 12);
+      const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+      const targetOffset = BigInt(view.getUint32(0, true));
+      const selector = view.getUint16(4, true);
+      const restoredFlags = BigInt(view.getUint32(8, true));
+      const targetCpl = selector & 3;
+      if (targetCpl === this.segments.cpl) {
+        const cache = this.segments.prepareCodeTransition(selector, { targetCpl, allowInward: false }).cache;
+        if (targetOffset > cache.limit || cache.base + targetOffset >= BigInt(this.memory.byteLength)) throw new Error("IRET target exceeds code segment or guest memory");
+        this.segments.installCodeSegment(selector);
+        this.setRegister(4, esp + 12n, 32);
+      } else if (targetCpl > this.segments.cpl) {
+        if (esp + 19n > stack.limit) throw new Error("Outer-privilege IRET frame exceeds current SS limit");
+        const outer = this.#readLinear(Number(linear), 20);
+        const full = new DataView(outer.buffer, outer.byteOffset, outer.byteLength);
+        const outerEsp = BigInt(full.getUint32(12, true));
+        const outerSs = full.getUint16(16, true);
+        const plan = this.segments.prepareCodeReturn(selector);
+        const targetStack = this.segments.prepareStack(outerSs, { targetCpl });
+        if (targetOffset > plan.cache.limit || plan.cache.base + targetOffset >= BigInt(this.memory.byteLength)) throw new Error("IRET target exceeds code segment or guest memory");
+        if (outerEsp > targetStack.limit) throw new Error("Restored ESP exceeds outer SS limit");
+        this.segments.commitPrivilegeTransition(plan, outerSs, targetStack);
+        this.setRegister(4, outerEsp, 32);
+      } else {
+        throw new Error("IRET cannot return to a more privileged ring");
       }
       this.ip = Number(targetOffset);
       this.flags = (restoredFlags & 0x003f7fd7n) | 2n;
