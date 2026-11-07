@@ -416,6 +416,7 @@ export class X86Cpu {
   }
 
   step() {
+    if (this.halted && this.pendingInterrupts.length && (this.flags & (1n << 9n)) !== 0n) this.halted = false;
     if (this.halted) return { state: "halted", ip: this.ip };
     const start = this.ip;
     if (this.mode === 32 && (this.flags & (1n << 9n)) !== 0n && this.pendingInterrupts.length) {
