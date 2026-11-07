@@ -6,8 +6,8 @@ const ADDRESS_MASK = (1n << 48n) - 1n;
 const CANONICAL_HIGH = 0xffff000000000000n;
 
 export class PageFault extends Error {
-  constructor(address, { present = false, write = false, user = false, instruction = false } = {}) {
-    const errorCode = (present ? 1 : 0) | (write ? 2 : 0) | (user ? 4 : 0) | (instruction ? 16 : 0);
+  constructor(address, { present = false, write = false, user = false, reserved = false, instruction = false } = {}) {
+    const errorCode = (present ? 1 : 0) | (write ? 2 : 0) | (user ? 4 : 0) | (reserved ? 8 : 0) | (instruction ? 16 : 0);
     super(`Guest page fault at 0x${BigInt(address).toString(16)} (error code 0x${errorCode.toString(16)})`);
     this.name = "PageFault";
     this.address = BigInt(address);
@@ -15,6 +15,7 @@ export class PageFault extends Error {
     this.present = present;
     this.write = write;
     this.user = user;
+    this.reserved = reserved;
     this.instruction = instruction;
   }
 }
@@ -153,8 +154,9 @@ export class GuestAddressSpace {
       if (!allowed) throw new PageFault(virtual, { present: true, write, user, instruction: execute });
       const alignmentMask = pageSize - 1n;
       const addressField = entry & 0x0000fffffffff000n;
-      if ((addressField & alignmentMask) !== 0n) {
-        throw new PageFault(virtual, { present: true, write, user, instruction: execute });
+      const reservedAddressBits = alignmentMask & ~0x1000n; // bit 12 is the large-page PAT bit
+      if ((addressField & reservedAddressBits) !== 0n) {
+        throw new PageFault(virtual, { present: true, write, user, reserved: true, instruction: execute });
       }
       const physicalBase = addressField & ~alignmentMask;
       const physical = physicalBase | (virtual & alignmentMask);
