@@ -1,7 +1,7 @@
 import { GuestMemory } from "../../runtime/src/index.js";
 import { X86LegacyPaging32, PageFault } from "../../runtime/src/mmu.js";
 import { X86SystemTableState } from "./system-tables.js";
-export { X86Tss32 } from "./task-state.js";
+export { X86Tss32, X86Tss64 } from "./task-state.js";
 import { X86DescriptorTable } from "./descriptors.js";
 import { X86SegmentState } from "./segments.js";
 import { X86Tss32 } from "./task-state.js";
