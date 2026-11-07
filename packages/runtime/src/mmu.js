@@ -254,3 +254,155 @@ export class GuestAddressSpace {
   get mappingCount() { return this.#mappings.size; }
   flush() { this.#tlb.clear(); }
 }
+
+
+/**
+ * Legacy non-PAE 32-bit x86 paging (two-level PDE/PTE walk).
+ * Supports 4 KiB pages and CR4.PSE 4 MiB pages. This is a paging primitive;
+ * the CPU must route all guest linear memory accesses through it for enforcement.
+ */
+export class X86LegacyPaging32 {
+  #cr3 = null;
+  #tlb = new Map();
+
+  constructor(memory, { pse = false, writeProtect = false } = {}) {
+    if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
+    this.memory = memory;
+    this.pse = Boolean(pse);
+    this.writeProtect = Boolean(writeProtect);
+  }
+
+  setControl({ pse = this.pse, writeProtect = this.writeProtect } = {}) {
+    this.pse = Boolean(pse);
+    this.writeProtect = Boolean(writeProtect);
+    this.flush();
+  }
+
+  loadCr3(value) {
+    const cr3 = BigInt(value);
+    if (cr3 < 0n || cr3 > 0xfffff000n || (cr3 & 0xfffn) !== 0n
+      || cr3 + 4096n > BigInt(this.memory.byteLength)) {
+      throw new RangeError("32-bit CR3 must reference an aligned page directory in guest physical memory");
+    }
+    this.#cr3 = cr3;
+    this.flush();
+  }
+
+  get cr3() { return this.#cr3; }
+  flush() { this.#tlb.clear(); }
+
+  #read32(address) {
+    if (address < 0n || address + 4n > BigInt(this.memory.byteLength)) {
+      throw new PageFault(0n, { present: true, reserved: true });
+    }
+    const b = this.memory.read(Number(address), 4);
+    return (b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0;
+  }
+
+  #write32(address, value) {
+    const v = value >>> 0;
+    this.memory.write(Number(address), Uint8Array.of(v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255));
+  }
+
+  translate(linearAddress, { write = false, user = false, execute = false } = {}) {
+    const linear = BigInt(linearAddress);
+    if (linear < 0n || linear > 0xffffffffn) throw new RangeError("Linear address is outside 32-bit range");
+    if (this.#cr3 === null) return Number(linear);
+    const cached = this.#tlb.get(linear >> 12n);
+    if (cached) {
+      const denied = (user && !cached.user) || (write && !cached.writable && (user || this.writeProtect));
+      if (denied) throw new PageFault(linear, { present: true, write, user, instruction: execute });
+      return Number(cached.physical | (linear & 0xfffn));
+    }
+
+    const directoryIndex = Number((linear >> 22n) & 0x3ffn);
+    const tableIndex = Number((linear >> 12n) & 0x3ffn);
+    const pdeAddress = this.#cr3 + BigInt(directoryIndex * 4);
+    let pde = this.#read32(pdeAddress);
+    if ((pde & 1) === 0) throw new PageFault(linear, { write, user, instruction: execute });
+
+    const large = (pde & 0x80) !== 0;
+    if (large && !this.pse) throw new PageFault(linear, { present: true, write, user, reserved: true, instruction: execute });
+    if (large && (pde & 0x003fe000) !== 0) {
+      throw new PageFault(linear, { present: true, write, user, reserved: true, instruction: execute });
+    }
+    let pteAddress = null;
+    let pte = null;
+    let physicalBase;
+    let pageSize;
+    let writable = (pde & 2) !== 0;
+    let userAllowed = (pde & 4) !== 0;
+
+    if (large) {
+      pageSize = 0x400000n;
+      physicalBase = BigInt(pde & 0xffc00000);
+      if (physicalBase + pageSize > BigInt(this.memory.byteLength)) {
+        throw new PageFault(linear, { present: true, write, user, reserved: true, instruction: execute });
+      }
+    } else {
+      const tableBase = BigInt(pde & 0xfffff000);
+      if (tableBase + 4096n > BigInt(this.memory.byteLength)) {
+        throw new PageFault(linear, { present: true, write, user, reserved: true, instruction: execute });
+      }
+      pteAddress = tableBase + BigInt(tableIndex * 4);
+      pte = this.#read32(pteAddress);
+      if ((pte & 1) === 0) throw new PageFault(linear, { write, user, instruction: execute });
+      writable &&= (pte & 2) !== 0;
+      userAllowed &&= (pte & 4) !== 0;
+      physicalBase = BigInt(pte & 0xfffff000);
+      pageSize = 0x1000n;
+    }
+
+    const denied = (user && !userAllowed) || (write && !writable && (user || this.writeProtect));
+    if (denied) throw new PageFault(linear, { present: true, write, user, instruction: execute });
+
+    // Hardware sets Accessed on every traversed entry and Dirty on a written leaf.
+    if ((pde & 0x20) === 0) { pde |= 0x20; this.#write32(pdeAddress, pde); }
+    if (pte !== null) {
+      if ((pte & 0x20) === 0) pte |= 0x20;
+      if (write && (pte & 0x40) === 0) pte |= 0x40;
+      this.#write32(pteAddress, pte);
+    } else if (write && (pde & 0x40) === 0) {
+      pde |= 0x40;
+      this.#write32(pdeAddress, pde);
+    }
+
+    const physical = physicalBase | (linear & (pageSize - 1n));
+    if (physical >= BigInt(this.memory.byteLength)) {
+      throw new PageFault(linear, { present: true, write, user, reserved: true, instruction: execute });
+    }
+    const pageBase = linear & ~0xfffn;
+    this.#tlb.set(pageBase, { physical: physical & ~0xfffn, writable, user: userAllowed });
+    return Number(physical);
+  }
+
+  read(linearAddress, length, options = {}) {
+    if (!Number.isSafeInteger(length) || length < 0) throw new RangeError("Invalid read length");
+    const output = new Uint8Array(length);
+    let offset = 0;
+    while (offset < length) {
+      const linear = BigInt(linearAddress) + BigInt(offset);
+      const physical = this.translate(linear, options);
+      const count = Math.min(length - offset, 4096 - Number(linear & 0xfffn));
+      output.set(this.memory.read(physical, count), offset);
+      offset += count;
+    }
+    return output;
+  }
+
+  write(linearAddress, source, options = {}) {
+    const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const linear = BigInt(linearAddress) + BigInt(offset);
+      const physical = this.translate(linear, { ...options, write: true });
+      const count = Math.min(bytes.length - offset, 4096 - Number(linear & 0xfffn));
+      this.memory.write(physical, bytes.subarray(offset, offset + count));
+      offset += count;
+    }
+  }
+
+  fetch(linearAddress, length, options = {}) {
+    return this.read(linearAddress, length, { ...options, execute: true });
+  }
+}
