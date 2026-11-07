@@ -304,7 +304,7 @@ test("IMUL sets carry and overflow when the signed product is truncated", () => 
 test("supports 64-bit signed IMUL with REX.W", () => {
   const cpu = cpuFor([0x48,0x0f,0xaf,0xc8], 64);
   cpu.setRegister(0, 0xfffffffffffffffen, 64);
-  cpu.setRegister(1, 9n, 64);
+  cpu.setRegister(1, 7n, 64);
   cpu.step();
   assert.equal(cpu.getRegister(1,64), 0xfffffffffffffff2n);
 });
