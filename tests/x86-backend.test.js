@@ -39,3 +39,16 @@ test("backend rejects invalid configurations and out-of-bounds programs", async 
   const machine = await backend.createMachine({ memoryPages: 1, maximumPages: 1 });
   assert.throws(() => machine.loadProgram(new Uint8Array(4097)), RangeError);
 });
+
+import { parseHexProgram } from "../packages/x86-core/src/backend.js";
+
+test("hexadecimal program parser accepts whitespace and comma-separated bytes", () => {
+  assert.deepEqual([...parseHexProgram("B8 2A 00 00 00 F4")], [0xb8,0x2a,0,0,0,0xf4]);
+  assert.deepEqual([...parseHexProgram("0x48, 0xB8")], [0x48,0xb8]);
+});
+
+test("hexadecimal program parser rejects empty and malformed bytes", () => {
+  assert.throws(() => parseHexProgram(""), TypeError);
+  assert.throws(() => parseHexProgram("B8 2"), TypeError);
+  assert.throws(() => parseHexProgram("GG"), TypeError);
+});
