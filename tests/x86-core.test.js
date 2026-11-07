@@ -371,5 +371,5 @@ test("64-bit immediate IMUL sign-extends its 32-bit immediate", () => {
   const cpu = cpuFor([0x48,0x69,0xc8,0xff,0xff,0xff,0xff], 64);
   cpu.setRegister(0, 3n, 64);
   cpu.step();
-  assert.equal(cpu.getRegister(1,64), 0xfffffffffffffff7n);
+  assert.equal(cpu.getRegister(1,64), 0xfffffffffffffffdn);
 });
