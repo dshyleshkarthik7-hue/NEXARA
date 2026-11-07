@@ -7,7 +7,7 @@ function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCo
   const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
   const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x600 });
   const gdtBase = 0x100;
-  const idtBase = 0x300;
+  const idtBase = 0x900;
   const putDescriptor = (index, { base = 0, limit = 0xfffff, access, flags = 0xc } = {}) => {
     const bytes = new Uint8Array(8);
     bytes[0] = limit & 0xff; bytes[1] = (limit >>> 8) & 0xff;
