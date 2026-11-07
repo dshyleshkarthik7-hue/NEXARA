@@ -341,9 +341,8 @@ export class X86LegacyPaging32 {
     if (large) {
       pageSize = 0x400000n;
       physicalBase = BigInt(pde & 0xffc00000);
-      if (physicalBase + pageSize > BigInt(this.memory.byteLength)) {
-        throw new PageFault(linear, { present: true, write, user, reserved: true, instruction: execute });
-      }
+      // A large mapping may extend beyond installed RAM; validate the actual
+      // translated byte below, as a hardware bus model may map holes/devices.
     } else {
       const tableBase = BigInt(pde & 0xfffff000);
       if (tableBase + 4096n > BigInt(this.memory.byteLength)) {
