@@ -19,8 +19,11 @@ export class X86SystemTableState {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
     this.memory = memory;
     this.longMode = Boolean(longMode);
-    this.gdtr = { base: 0n, limit: 0xffff };
-    this.idtr = { base: 0n, limit: 0xffff };
+    // Reset-state table limits must remain addressable in this configured RAM.
+    // Software can later load the architectural 16-bit limit explicitly.
+    const resetLimit = Math.min(0xffff, memory.byteLength - 1);
+    this.gdtr = { base: 0n, limit: resetLimit };
+    this.idtr = { base: 0n, limit: resetLimit };
     this.ldtr = { selector: 0, base: 0n, limit: 0, present: false, usable: false };
     this.task = { selector: 0, base: 0n, limit: 0, present: false, busy: false, usable: false };
   }
