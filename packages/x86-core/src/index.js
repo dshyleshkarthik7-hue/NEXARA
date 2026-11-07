@@ -412,9 +412,10 @@ export class X86Cpu {
     } else if (opcode === 0xff) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       const extension = decoded.reg & 7;
-      const arithmeticWidth = this.mode === 64 ? (rex & 8 ? 64 : 32) : width;
+      const arithmeticWidth = this.mode === 64 ? (rex & 8 ? 64 : operand16 ? 16 : 32) : width;
       const controlWidth = this.#stackWidth(width);
-      const value = this.#readOperand(decoded.operand, [2, 4, 6].includes(extension) ? controlWidth : arithmeticWidth);
+      const pushWidth = this.mode === 64 && operand16 ? 16 : controlWidth;
+      const value = this.#readOperand(decoded.operand, extension === 2 || extension === 4 ? controlWidth : extension === 6 ? pushWidth : arithmeticWidth);
       if (extension === 0 || extension === 1) {
         const carry = this.flags & CF;
         const result = this.#alu(extension === 0 ? "add" : "sub", value, 1n, arithmeticWidth);
@@ -426,7 +427,7 @@ export class X86Cpu {
         if (extension === 2) this.#push(BigInt(this.ip), this.#stackWidth(width));
         this.ip = Number(target);
       } else if (extension === 6) {
-        this.#push(value, this.#stackWidth(width));
+        this.#push(value, pushWidth);
       } else {
         throw new CpuFault("Unsupported FF integer extension", start);
       }
