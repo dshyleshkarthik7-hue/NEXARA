@@ -356,7 +356,7 @@ test("IMUL immediate forms sign-extend imm8 and compute signed products", () => 
   const cpu = cpuFor([0x6b,0xc8,0xf9], 32);
   cpu.setRegister(0, 6n, 32);
   cpu.step();
-  assert.equal(cpu.getRegister(1,32), 0xffffffe2n);
+  assert.equal(cpu.getRegister(1,32), 0xffffffd6n);
   const wide = cpuFor([0x69,0xc8,0x00,0x00,0x00,0x40], 32);
   wide.setRegister(0, 2n, 32);
   wide.step();
@@ -364,4 +364,12 @@ test("IMUL immediate forms sign-extend imm8 and compute signed products", () => 
   const flags = BigInt(wide.saveState().flags);
   assert.equal((flags & 1n) !== 0n, true);
   assert.equal((flags & (1n << 11n)) !== 0n, true);
+});
+
+
+test("64-bit immediate IMUL sign-extends its 32-bit immediate", () => {
+  const cpu = cpuFor([0x48,0x69,0xc8,0xff,0xff,0xff,0xff], 64);
+  cpu.setRegister(0, 3n, 64);
+  cpu.step();
+  assert.equal(cpu.getRegister(1,64), 0xfffffffffffffff7n);
 });
