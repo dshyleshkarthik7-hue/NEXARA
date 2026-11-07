@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Pic8259, Pit8253 } from "../packages/runtime/src/devices.js";
+import { Pic8259, Pit8253 } from "../packages/runtime/src/index.js";
 
 test("dual 8259 PIC initializes vectors, masks IRQs and acknowledges slave IRQs", () => {
   const pic = new Pic8259();
