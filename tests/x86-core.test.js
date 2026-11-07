@@ -209,7 +209,7 @@ test("CPU rejects incompatible or malformed save states without changing state",
 
 
 test("CPUID reports NEXARA vendor identity and only implemented base features", () => {
-  const cpu = cpuFor([0x0f,0xa2,0xf4], 64);
+  const cpu = cpuFor([0x0f,0xa2,0x0f,0xa2,0xf4], 64);
   cpu.setRegister(0, 0n, 32);
   cpu.step();
   assert.equal(cpu.getRegister(0, 32), 1n);
