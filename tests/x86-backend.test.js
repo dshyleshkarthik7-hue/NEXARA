@@ -146,3 +146,26 @@ test("control registers and EFER survive save-state restore", async () => {
   assert.equal(machine.cpu.readControlRegister(0), 0xe0000011n);
   assert.equal((machine.cpu.readMsr(0xc0000080) & (1n << 10n)) !== 0n, true);
 });
+
+
+test("EFER.NXE controls execution faults for NX guest page-table entries", async () => {
+  const machine = await new X86InterpreterBackend().createMachine({ mode: 64, memoryPages: 5, virtualMemory: true });
+  const put64 = (address, value) => {
+    const bytes = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) bytes[i] = Number((value >> BigInt(i * 8)) & 0xffn);
+    machine.memory.write(address, bytes);
+  };
+  put64(0, 0x1007n);
+  put64(0x1000, 0x2007n);
+  put64(0x2000, 0x3007n);
+  put64(0x3000 + 4 * 8, 0x4007n | (1n << 63n));
+  machine.cpu.writeControlRegister(4, 1n << 5n);
+  machine.cpu.writeControlRegister(3, 0n);
+  machine.cpu.writeMsr(0xc0000080, 1n << 11n); // NXE
+  machine.cpu.writeControlRegister(0, 0xe0000011n); // enable paging and protected mode
+  assert.throws(() => machine.addressSpace.fetch(0x4000n, 1), error =>
+    error.name === "PageFault" && error.present && error.instruction && !error.reserved);
+  machine.cpu.writeMsr(0xc0000080, 0n); // NX without NXE is a reserved-bit fault
+  assert.throws(() => machine.addressSpace.fetch(0x4000n, 1), error =>
+    error.name === "PageFault" && error.present && error.instruction && error.reserved);
+});
