@@ -330,6 +330,41 @@ export class X86Cpu {
       if (second >= 0x80 && second <= 0x8f) {
         const displacement = this.#fetchSigned(4);
         if (this.#condition(second & 15)) this.#branch(displacement, start);
+      } else if (second === 0xa2) {
+        // CPUID reports only the small, explicitly implemented NEXARA feature set.
+        const leaf = this.getRegister(0, 32);
+        const subleaf = this.getRegister(1, 32);
+        let eax = 0n, ebx = 0n, ecx = 0n, edx = 0n;
+        const pack = (value) => {
+          let result = 0n;
+          for (let i = 0; i < 4; i++) result |= BigInt(value.charCodeAt(i) || 0) << BigInt(i * 8);
+          return result;
+        };
+        if (leaf === 0n) {
+          eax = 1n;
+          const vendor = "NEXARA      ";
+          ebx = pack(vendor.slice(0, 4));
+          edx = pack(vendor.slice(4, 8));
+          ecx = pack(vendor.slice(8, 12));
+        } else if (leaf === 1n) {
+          eax = 0x00000663n;
+          // TSC is exposed because the deterministic RDTSC subset is implemented.
+          edx = 1n << 4n;
+        } else if (leaf === 0x80000000n) {
+          eax = 0x80000001n;
+        } else if (leaf === 0x80000001n && this.mode === 64) {
+          // Long mode capability only; this does not imply full x86-64 compatibility.
+          edx = 1n << 29n;
+        }
+        this.setRegister(0, eax, 32);
+        this.setRegister(3, ebx, 32);
+        this.setRegister(1, ecx, 32);
+        this.setRegister(2, edx, 32);
+        void subleaf;
+      } else if (second === 0x31) {
+        const timestamp = BigInt(this.instructionsExecuted);
+        this.setRegister(0, timestamp & 0xffffffffn, 32);
+        this.setRegister(2, timestamp >> 32n, 32);
       } else throw new CpuFault(`Unsupported 0F opcode 0x${second.toString(16)}`, start);
     } else {
       throw new CpuFault(`Unsupported opcode 0x${opcode.toString(16).padStart(2, "0")}`, start);
