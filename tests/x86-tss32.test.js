@@ -16,12 +16,12 @@ test("enforces the TSS I/O bitmap for every byte of an IN/OUT width", () => {
   const tss = new X86Tss32(memory, { base: 0x200, limit: 0x1ff });
   tss.ioMapBase = 104;
   // Bitmap begins at TSS base + 104; a zero bit permits the corresponding port.
-  memory.write(0x200 + 104, Uint8Array.of(0, 0b00000100));
+  memory.write(0x200 + 104, Uint8Array.of(0, 0b00000101));
   assert.equal(tss.allowsIo(0, 8), true);
   assert.equal(tss.allowsIo(8, 8), true);
   assert.equal(tss.allowsIo(10, 8), false);
   assert.equal(tss.allowsIo(7, 16), false);
-  assert.equal(tss.allowsIo(0xffff, 16), false);
+  assert.throws(() => tss.allowsIo(0xffff, 16), /Invalid TSS I\/O/);
 });
 
 test("treats a missing or truncated I/O bitmap as denying access", () => {
