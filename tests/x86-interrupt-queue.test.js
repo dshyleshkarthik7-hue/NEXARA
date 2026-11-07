@@ -26,3 +26,12 @@ test("CPU snapshots preserve pending external interrupts", () => {
   state.pendingInterrupts = [999];
   assert.throws(() => restored.loadState(state), /incompatible x86 CPU state/i);
 });
+
+test("CPU retains an external interrupt when IDT delivery cannot be completed", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const cpu = new X86Cpu({ memory, mode: 32 });
+  cpu.flags |= 1n << 9n;
+  cpu.requestInterrupt(32);
+  assert.throws(() => cpu.step(), /interrupt|descriptor|gate|IDT/i);
+  assert.deepEqual(cpu.saveState().pendingInterrupts, [32]);
+});
