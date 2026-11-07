@@ -3,7 +3,7 @@ import { X86Cpu } from "./index.js";
 
 export function parseHexProgram(source) {
   if (typeof source !== "string") throw new TypeError("Hex program must be text");
-  const tokens = source.trim().split(/[\\s,]+/).filter(Boolean);
+  const tokens = source.trim().split(/[\s,]+/).filter(Boolean);
   if (!tokens.length) throw new TypeError("Hex program is empty");
   return Uint8Array.from(tokens.map(token => {
     const hex = token.toLowerCase().startsWith("0x") ? token.slice(2) : token;
