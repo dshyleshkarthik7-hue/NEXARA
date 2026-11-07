@@ -42,13 +42,13 @@ export class X86Cpu {
 
   getRegister(index, width = this.mode) {
     this.#reg(index);
-    if (![16, 32, 64].includes(width) || (width === 64 && this.mode !== 64)) throw new RangeError("Invalid register width");
+    if (![8, 16, 32, 64].includes(width) || (width === 64 && this.mode !== 64)) throw new RangeError("Invalid register width");
     return this.registers[index] & this.#mask(width);
   }
 
   setRegister(index, value, width = this.mode) {
     this.#reg(index);
-    if (![16, 32, 64].includes(width) || (width === 64 && this.mode !== 64)) throw new RangeError("Invalid register width");
+    if (![8, 16, 32, 64].includes(width) || (width === 64 && this.mode !== 64)) throw new RangeError("Invalid register width");
     const mask = this.#mask(width);
     const v = BigInt(value) & mask;
     if (width === 32 || width === 64) this.registers[index] = v;
