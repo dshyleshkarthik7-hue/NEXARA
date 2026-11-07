@@ -6,7 +6,7 @@ NEXARA combines a lightweight editor, browser terminal client, server session ga
 
 ## Current implementation
 
-- Browser workspace with a lightweight editor, file navigation, and terminal client.
+- Browser workspace with a lightweight editor, multi-file navigation, IndexedDB autosave, text-file import/export, and keyboard save/open shortcuts.
 - IndexedDB-backed browser file storage with bounded text files, normalized paths, per-file revisions, and stale-write conflict detection.
 - Server-side PTY sessions over WebSocket.
 - Per-session random credentials, constant-time credential comparison, WebSocket origin allowlisting, bounded input, and a configurable session ceiling.
@@ -61,6 +61,9 @@ The server defaults to loopback binding. Browser origins are allowlisted, and ea
 - `PORT`: HTTP/WebSocket port (default `8787`).
 - `ALLOWED_ORIGINS`: comma-separated browser origins (default `http://localhost:5173`).
 - `NEXARA_MAX_SESSIONS`: maximum concurrent PTY sessions (default `4`).
+- `NEXARA_MAX_SESSIONS_PER_CLIENT`: active sessions per client IP (default `2`).
+- `NEXARA_SESSION_CREATE_LIMIT`: session creation attempts per client per minute (default `8`).
+- `NEXARA_SESSION_IDLE_MS`: idle PTY lifetime in milliseconds (default `1800000`, minimum `60000`).
 - `NEXARA_SHELL`: shell executable override.
 - `NEXARA_WORKDIR`: initial working directory.
 
@@ -70,4 +73,4 @@ No license has been selected yet. All rights reserved by default; do not assume 
 
 ### x86 execution core status
 
-The repository now contains an experimental, deliberately bounded instruction interpreter in `packages/x86-core`. Its current tested subset includes NOP, HLT, selected register/immediate MOV operations, register-direct ADD/SUB/XOR, accumulator immediate arithmetic, and relative jumps in 32-bit and 64-bit modes. It uses the shared guest-memory primitive and an instruction budget. It does not yet implement the complete x86 ISA or addressing forms, byte-register encoding rules, segmentation, paging, privilege levels, interrupts, descriptor tables, floating point/SIMD, system instructions, firmware, devices, or Linux boot. It must not be described as full x86 compatibility.
+The repository contains an experimental, deliberately bounded instruction interpreter in `packages/x86-core`. Its tested subset includes NOP, HLT, selected register/immediate MOV operations, selected base-register memory operands, LEA, ADD/SUB/AND/OR/XOR/CMP/TEST forms, immediate group-1 arithmetic, stack push/pop, CALL/RET, relative jumps, selected conditional branches, and CPU-plus-memory save-state restoration. It uses the shared guest-memory primitive and an instruction budget. It does not implement the complete x86 ISA or addressing forms, byte-register encoding rules, segmentation, paging, privilege levels, interrupts, descriptor tables, floating point/SIMD, system instructions, firmware, devices, or Linux boot. It must not be described as full x86 compatibility.
