@@ -103,3 +103,43 @@ test("CPU save state preserves the hardware-style page-table root", async () => 
   machine.loadState(state);
   assert.equal(machine.addressSpace.pageTableRoot, 0n);
 });
+
+
+test("CR0 CR3 and CR4 validate paging prerequisites and reserved bits", async () => {
+  const machine = await new X86InterpreterBackend().createMachine({ mode: 64, memoryPages: 2, virtualMemory: true });
+  const cpu = machine.cpu;
+  assert.equal(cpu.readControlRegister(0), 0x60000010n);
+  assert.throws(() => cpu.writeControlRegister(0, 1n << 31n), /requires CR0.PE/i);
+  assert.throws(() => cpu.writeControlRegister(4, 1n << 63n), /reserved bits/i);
+  assert.throws(() => cpu.writeControlRegister(3, 1n), /aligned/i);
+  cpu.writeControlRegister(4, 1n << 5n); // CR4.PAE
+  cpu.writeControlRegister(0, 0xe0000011n); // CR0.PG | CD | NW | PE
+  assert.equal(cpu.readControlRegister(0), 0xe0000011n);
+  assert.throws(() => cpu.writeControlRegister(4, 0n), /cannot clear CR4.PAE/i);
+});
+
+test("EFER LME activates modeled LMA only with PAE paging and controls NX", async () => {
+  const machine = await new X86InterpreterBackend().createMachine({ mode: 64, memoryPages: 5, virtualMemory: true });
+  const cpu = machine.cpu;
+  cpu.writeControlRegister(4, 1n << 5n);
+  cpu.writeControlRegister(0, 0xe0000011n);
+  cpu.writeMsr(0xc0000080, (1n << 8n) | (1n << 11n));
+  assert.equal((cpu.readMsr(0xc0000080) & (1n << 10n)) !== 0n, true);
+  assert.equal((cpu.readMsr(0xc0000080) & (1n << 11n)) !== 0n, true);
+  assert.equal(machine.addressSpace.pageTableRoot, 0n);
+  assert.throws(() => cpu.writeMsr(0xc0000080, 1n << 10n), /reserved or read-only/i);
+});
+
+test("control registers and EFER survive save-state restore", async () => {
+  const machine = await new X86InterpreterBackend().createMachine({ mode: 64, memoryPages: 2, virtualMemory: true });
+  machine.cpu.writeControlRegister(4, 1n << 5n);
+  machine.cpu.writeControlRegister(0, 0xe0000011n);
+  machine.cpu.writeMsr(0xc0000080, (1n << 8n) | (1n << 11n));
+  const state = machine.saveState();
+  machine.cpu.writeMsr(0xc0000080, 0n);
+  machine.cpu.writeControlRegister(0, 0x60000010n);
+  machine.loadState(state);
+  assert.equal(machine.cpu.readControlRegister(4), 1n << 5n);
+  assert.equal(machine.cpu.readControlRegister(0), 0xe0000011n);
+  assert.equal((machine.cpu.readMsr(0xc0000080) & (1n << 10n)) !== 0n, true);
+});
