@@ -29,6 +29,7 @@ export class GuestAddressSpace {
   #mappings = new Map();
   #tlb = new Map();
   #pageTableRoot = null;
+  #nxEnabled = false;
 
   constructor(memory, { physicalAddressBits = 48, virtualAddressBits = 48 } = {}) {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
@@ -111,6 +112,7 @@ export class GuestAddressSpace {
   }
 
   get pageTableRoot() { return this.#pageTableRoot; }
+  setNxEnabled(enabled) { this.#nxEnabled = Boolean(enabled); this.#tlb.clear(); }
   clearPageTableRoot() { this.#pageTableRoot = null; this.#tlb.clear(); }
 
   #readEntry(address) {
@@ -134,7 +136,7 @@ export class GuestAddressSpace {
       const entry = this.#readEntry(entryAddress);
       const present = (entry & 1n) !== 0n;
       if (!present) throw new PageFault(virtual, { write, user, instruction: execute });
-      if ((entry & 0x7fff000000000000n) !== 0n) {
+      if ((entry & 0x7fff000000000000n) !== 0n || (!this.#nxEnabled && (entry & (1n << 63n)) !== 0n)) {
         throw new PageFault(virtual, { present: true, write, user, reserved: true, instruction: execute });
       }
       effectiveWrite &&= (entry & 2n) !== 0n;
