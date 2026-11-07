@@ -591,7 +591,7 @@ export class X86Cpu {
       || !(state.memory instanceof Uint8Array) || state.memory.byteLength <= state.ip
       || state.memory.byteLength % 4096 !== 0
       || (this.addressSpace && !Array.isArray(state.addressSpace))
-      || (state.pageTableRoot !== null && state.pageTableRoot !== undefined && (typeof state.pageTableRoot !== "string" || !/^\\d+$/.test(state.pageTableRoot)))
+      || (state.pageTableRoot !== null && state.pageTableRoot !== undefined && (typeof state.pageTableRoot !== "string" || !/^\d+$/.test(state.pageTableRoot)))
       || (!this.addressSpace && state.pageTableRoot != null)) {
       throw new TypeError("Invalid or incompatible x86 CPU state");
     }
