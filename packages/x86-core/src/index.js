@@ -346,6 +346,43 @@ export class X86Cpu {
     return { state: this.halted ? "halted" : "limit", instructionsExecuted: executed, ip: this.ip };
   }
 
+  saveState() {
+    return {
+      format: "nexara-x86-state-v1",
+      mode: this.mode,
+      ip: this.ip,
+      registers: this.registers.map(value => value.toString()),
+      flags: this.flags.toString(),
+      halted: this.halted,
+      instructionsExecuted: this.instructionsExecuted,
+      memory: this.memory.snapshot()
+    };
+  }
+
+  loadState(state) {
+    if (!state || state.format !== "nexara-x86-state-v1" || state.mode !== this.mode
+      || !Number.isSafeInteger(state.ip) || state.ip < 0 || state.ip >= this.memory.byteLength
+      || !Array.isArray(state.registers) || state.registers.length !== 16
+      || !state.registers.every(value => typeof value === "string" && /^\\d+$/.test(value))
+      || typeof state.flags !== "string" || !/^\\d+$/.test(state.flags)
+      || typeof state.halted !== "boolean"
+      || !Number.isSafeInteger(state.instructionsExecuted) || state.instructionsExecuted < 0
+      || !(state.memory instanceof Uint8Array)) {
+      throw new TypeError("Invalid or incompatible x86 CPU state");
+    }
+    const registers = state.registers.map(value => BigInt(value));
+    const flags = BigInt(state.flags);
+    if (registers.some(value => value > this.#mask(64)) || flags > this.#mask(64)) {
+      throw new RangeError("CPU state contains out-of-range values");
+    }
+    this.memory.restore(state.memory);
+    this.ip = state.ip;
+    this.registers = registers;
+    this.flags = flags;
+    this.halted = state.halted;
+    this.instructionsExecuted = state.instructionsExecuted;
+  }
+
   registerSnapshot() {
     return Object.fromEntries(REG_NAMES.slice(0, this.mode === 64 ? 16 : 8).map((name, i) => [name, this.registers[i].toString()]));
   }
