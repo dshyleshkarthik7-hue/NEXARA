@@ -459,3 +459,49 @@ test("MOVSXD sign-extends a 32-bit operand into a 64-bit register", () => {
   cpu.step();
   assert.equal(cpu.getRegister(0,64), 0xffffffff80000001n);
 });
+
+
+test("FF group supports INC and DEC while preserving carry", () => {
+  const inc = cpuFor([0xff,0xc0], 32);
+  inc.setRegister(0, 0x7fffffffn, 32);
+  inc.flags |= 1n;
+  inc.step();
+  assert.equal(inc.getRegister(0,32), 0x80000000n);
+  assert.equal((inc.flags & 1n), 1n);
+  assert.equal((inc.flags & (1n << 11n)) !== 0n, true);
+
+  const dec = cpuFor([0xff,0xc8], 32);
+  dec.setRegister(0, 0n, 32);
+  dec.flags |= 1n;
+  dec.step();
+  assert.equal(dec.getRegister(0,32), 0xffffffffn);
+  assert.equal((dec.flags & 1n), 1n);
+});
+
+test("FF group supports indirect CALL, JMP and PUSH", () => {
+  const call = cpuFor([0xff,0xd0,0xf4,0xf4], 32);
+  call.setRegister(0, 3n, 32);
+  call.setRegister(4, 512n, 32);
+  call.step();
+  assert.equal(call.ip, 3);
+  assert.equal(call.getRegister(4,32), 508n);
+  assert.equal(call.memory.read(508,4)[0], 2);
+
+  const jump = cpuFor([0xff,0xe0,0xf4,0xf4], 32);
+  jump.setRegister(0, 3n, 32);
+  jump.step();
+  assert.equal(jump.ip, 3);
+
+  const push = cpuFor([0xff,0xf0], 32);
+  push.setRegister(0, 0x12345678n, 32);
+  push.setRegister(4, 512n, 32);
+  push.step();
+  assert.equal(push.getRegister(4,32), 508n);
+  assert.deepEqual([...push.memory.read(508,4)], [0x78,0x56,0x34,0x12]);
+});
+
+test("FF indirect control transfers reject out-of-range targets", () => {
+  const cpu = cpuFor([0xff,0xe0], 32);
+  cpu.setRegister(0, 4096n, 32);
+  assert.throws(() => cpu.step(), /target outside memory/i);
+});
