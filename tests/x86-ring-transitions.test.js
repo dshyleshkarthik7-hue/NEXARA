@@ -4,7 +4,7 @@ import { GuestMemory } from "../packages/runtime/src/index.js";
 import { X86LegacyPaging32 } from "../packages/runtime/src/mmu.js";
 import { X86Cpu } from "../packages/x86-core/src/index.js";
 
-function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCode = false, paged = false, unmappedKernelPage = false, exceptionDelivery = false, doubleFaultGate = false } = {}) {
+function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCode = false, paged = false, unmappedKernelPage = false, exceptionDelivery = false, pageFaultGate = true, doubleFaultGate = false } = {}) {
   const memory = new GuestMemory({ initialPages: paged ? 5 : 2, maximumPages: paged ? 5 : 2 });
   const paging = paged ? new X86LegacyPaging32(memory) : null;
   const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x600, legacyPaging32: paging, exceptionDelivery });
@@ -35,7 +35,7 @@ function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCo
   pfGate[0] = 0x00; pfGate[1] = 0x07;
   pfGate[2] = 0x08; pfGate[3] = 0x00;
   pfGate[5] = 0x8e;
-  memory.write(idtBase + 14 * 8, pfGate);
+  if (pageFaultGate) memory.write(idtBase + 14 * 8, pfGate);
   if (doubleFaultGate) memory.write(idtBase + 8 * 8, pfGate);
   memory.write(0x600, Uint8Array.of(0xcd, 0x80, 0x90));
   memory.write(0x700, Uint8Array.of(0xcf)); // IRET
@@ -183,10 +183,23 @@ test("opt-in page-fault dispatch pushes CR2 error code and resumes at the handle
 });
 
 test("failed page-fault and double-fault delivery terminates as a triple fault", () => {
-  const { cpu, memory } = setup({ paged: true, exceptionDelivery: true });
+  const { cpu, memory } = setup({ paged: true, exceptionDelivery: true, ring0Stack: 8 });
   cpu.setRegister(3, 0x2000n, 32);
   memory.write(0x600, Uint8Array.of(0x8b, 0x03));
   assert.throws(() => cpu.step(), /Triple fault/);
   assert.equal(cpu.segments.cpl, 3);
   assert.equal(cpu.getRegister(4, 32), 0x1f00n);
+});
+
+test("page-fault delivery failure falls back to a valid double-fault gate", () => {
+  const { cpu, memory } = setup({ paged: true, exceptionDelivery: true, pageFaultGate: false, doubleFaultGate: true });
+  cpu.setRegister(3, 0x2000n, 32);
+  memory.write(0x600, Uint8Array.of(0x8b, 0x03));
+  const result = cpu.step();
+  assert.equal(result.vector, 8);
+  assert.equal(result.errorCode, 0);
+  assert.equal(cpu.segments.cpl, 0);
+  const frame = new DataView(memory.read(0x1800 - 24, 24).buffer);
+  assert.equal(frame.getUint32(0, true), 0);
+  assert.equal(frame.getUint32(4, true), 0x600);
 });
