@@ -116,6 +116,8 @@ async function initializeWorkspace() {
     files = await workspace.list();
     renderFileList(files);
     await openFile(files.some(file => file.path === "untitled.txt") ? "untitled.txt" : files[0].path);
+    editor.disabled = false;
+    document.querySelector("#new-file").disabled = false;
   } catch (error) {
     setSaveStatus("Browser storage unavailable");
     console.error("NEXARA workspace could not initialize", error);
