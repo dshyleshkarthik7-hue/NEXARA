@@ -78,6 +78,52 @@ export class X86SegmentState {
     return this.snapshot().cs;
   }
 
+  /**
+   * Validate a same-ring or inward non-conforming code transfer without
+   * mutating architectural state. The returned plan can be committed atomically.
+   */
+  prepareCodeTransition(selector, { targetCpl = selector & 3, allowInward = false } = {}) {
+    if (!Number.isInteger(targetCpl) || targetCpl < 0 || targetCpl > 3) throw new RangeError("Target CPL must be 0..3");
+    const descriptor = this.#resolve(selector);
+    if (!descriptor.executable || !descriptor.present || descriptor.conforming) {
+      throw new Error("Interrupt target must be a present non-conforming code segment");
+    }
+    if (descriptor.dpl !== targetCpl || (selector & 3) !== targetCpl) {
+      throw new Error("Code selector RPL and descriptor DPL must match target CPL");
+    }
+    if (targetCpl > this.cpl || (!allowInward && targetCpl !== this.cpl)) {
+      throw new Error("Invalid code-segment privilege transition");
+    }
+    return Object.freeze({ selector, targetCpl, cache: descriptor });
+  }
+
+  /** Commit a previously validated CS/CPL/SS tuple in one synchronous mutation. */
+  commitPrivilegeTransition(plan, stackSelector, stackDescriptor) {
+    if (!plan || !plan.cache || !Number.isInteger(plan.targetCpl)) throw new TypeError("Invalid code-transition plan");
+    if (!stackDescriptor || stackDescriptor.system || stackDescriptor.executable || !stackDescriptor.writable
+      || !stackDescriptor.present || stackDescriptor.dpl !== plan.targetCpl
+      || (stackSelector & 3) !== plan.targetCpl) {
+      throw new Error("Target SS must be present writable data with matching DPL and RPL");
+    }
+    // All validation is complete before the first mutation.
+    this.cpl = plan.targetCpl;
+    this.registers.cs = { selector: plan.selector, cache: plan.cache };
+    this.registers.ss = { selector: stackSelector, cache: stackDescriptor };
+    return this.snapshot();
+  }
+
+  prepareStack(selector, { targetCpl = this.cpl } = {}) {
+    if (!Number.isInteger(selector) || selector < 0 || selector > 0xffff || (selector & 0xfff8) === 0) {
+      throw new RangeError("Invalid target stack selector");
+    }
+    const descriptor = this.#table(selector).readSegment(selector, { cpl: targetCpl });
+    if (descriptor.system || descriptor.executable || !descriptor.writable || !descriptor.present
+      || descriptor.dpl !== targetCpl || (selector & 3) !== targetCpl) {
+      throw new Error("Target SS must be present writable data with matching DPL and RPL");
+    }
+    return descriptor;
+  }
+
   setCpl(cpl) {
     if (!Number.isInteger(cpl) || cpl < 0 || cpl > 3) throw new RangeError("CPL must be 0..3");
     this.cpl = cpl;
