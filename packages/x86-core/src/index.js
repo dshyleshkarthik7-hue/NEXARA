@@ -575,7 +575,8 @@ export class X86Cpu {
       halted: this.halted,
       instructionsExecuted: this.instructionsExecuted,
       memory: this.memory.snapshot(),
-      addressSpace: this.addressSpace ? this.addressSpace.snapshot() : null
+      addressSpace: this.addressSpace ? this.addressSpace.snapshot() : null,
+      pageTableRoot: this.addressSpace?.pageTableRoot === null || !this.addressSpace ? null : this.addressSpace.pageTableRoot.toString()
     };
   }
 
@@ -589,7 +590,9 @@ export class X86Cpu {
       || !Number.isSafeInteger(state.instructionsExecuted) || state.instructionsExecuted < 0
       || !(state.memory instanceof Uint8Array) || state.memory.byteLength <= state.ip
       || state.memory.byteLength % 4096 !== 0
-      || (this.addressSpace && !Array.isArray(state.addressSpace))) {
+      || (this.addressSpace && !Array.isArray(state.addressSpace))
+      || (state.pageTableRoot !== null && state.pageTableRoot !== undefined && (typeof state.pageTableRoot !== "string" || !/^\\d+$/.test(state.pageTableRoot)))
+      || (!this.addressSpace && state.pageTableRoot != null)) {
       throw new TypeError("Invalid or incompatible x86 CPU state");
     }
     const registers = state.registers.map(value => BigInt(value));
@@ -598,7 +601,11 @@ export class X86Cpu {
       throw new RangeError("CPU state contains out-of-range values");
     }
     this.memory.restore(state.memory);
-    if (this.addressSpace) this.addressSpace.restore(state.addressSpace);
+    if (this.addressSpace) {
+      this.addressSpace.restore(state.addressSpace);
+      if (state.pageTableRoot == null) this.addressSpace.clearPageTableRoot();
+      else this.addressSpace.setPageTableRoot(BigInt(state.pageTableRoot));
+    }
     this.ip = state.ip;
     this.registers = registers;
     this.flags = flags;
