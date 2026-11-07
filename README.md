@@ -1,26 +1,26 @@
 # NEXARA
 
-**Native Execution & Exchange Architecture** — a unified browser-and-server computing workspace.
+**Native Execution & Exchange Architecture** — a browser-and-server computing workspace with an experimental x86 interpreter.
 
-NEXARA combines a lightweight editor, browser terminal client, server session gateway, and a runtime boundary for multiple execution backends. The browser is the control surface; server sessions currently use host operating-system processes through a PTY.
+NEXARA currently combines a browser editor/workspace, a server session gateway, guest-memory and virtual-address-space primitives, and an experimental x86 execution backend. It is not yet a complete virtual machine or a bootable operating system environment.
 
-## Current implementation
+## Implemented components
 
-- Browser workspace with a lightweight editor, multi-file navigation, IndexedDB autosave, text-file import/export, keyboard save/open shortcuts, and a local x86 bytecode runner for the implemented instruction subset.
-- IndexedDB-backed browser file storage with bounded text files, normalized paths, per-file revisions, and stale-write conflict detection.
-- Server-side PTY sessions over WebSocket.
-- Per-session random credentials, constant-time credential comparison, WebSocket origin allowlisting, bounded input, and a configurable session ceiling.
-- Reduced environment inheritance for spawned shells.
-- PTY session registry with per-client active-session quotas, session-creation rate limits, constant-time per-session credential checks, idle expiry, and shutdown cleanup.
-- Shared client/server protocol, bounded guest-memory primitive with snapshots, and a 48-bit virtual address space with software mappings and an optional four-level x86-64 page-table walker, permission checks, cross-page access, CR3 root selection, and x86-style page-fault error codes.
-- Experimental x86 interpreter with a limited 32/64-bit integer instruction subset, including byte arithmetic and multiply/divide groups, byte/word sign- and zero-extension, common shifts, signed IMUL, and bounded DIV/IDIV, conservative CPUID feature/vendor reporting, deterministic RDTSC, bounded execution, and validated CPU-plus-memory save-state restoration.
-- Automated protocol, memory-boundary, CPU-subset, save-state, and workspace-storage tests.
+- Browser workspace with multi-file navigation, IndexedDB autosave, import/export, and a local x86 bytecode runner for the implemented instruction subset.
+- Server HTTP/WebSocket session gateway, authenticated PTY session registry, per-client quotas, rate limits, idle expiry, and origin allowlisting.
+- Unsandboxed host PTY execution disabled by default. An explicit trusted-local opt-in is restricted to loopback binding.
+- Bounded guest memory, snapshots, software virtual mappings, four-level x86-64 page-table walking, and a legacy non-PAE 32-bit paging path.
+- Experimental 32/64-bit x86 integer interpreter with a limited instruction set, CPU/memory save-state support, selected control-register/MSR operations, and guest I/O bus instructions.
+- Bounded GDT/LDT/IDT readers, GDTR/IDTR/LDTR/TR state, selected LGDT/LIDT/LLDT/LTR instructions, 32-bit TSS descriptor validation, TSS I/O bitmap enforcement, and a constrained protected-mode privilege-transition path.
+- PC/AT-style PIC/PIT device models and interrupt-fabric integration.
+- Signed VM capability-lease policy primitive. It is not yet enforced by a production microVM supervisor or device broker.
+- Automated tests for the implemented CPU, memory, paging, descriptor, interrupt, I/O, device, protocol, workspace, and session subsets.
 
 ## Requirements and run
 
 - Node.js 20+
 - npm 10+
-- A supported native build environment for `node-pty`.
+- Native build prerequisites for `node-pty`
 
 ```sh
 npm install
@@ -29,10 +29,9 @@ npm run dev
 
 Open http://localhost:5173. The API listens on http://localhost:8787.
 
-Production build and server:
-
 ```sh
 npm run build
+npm test
 npm start
 ```
 
@@ -42,79 +41,50 @@ Create a source distribution ZIP (includes the production browser build):
 npm run package
 ```
 
-The ZIP is written to `dist/NEXARA-package.zip`. On a fresh machine, extract it, install Node.js 20+ and the native build prerequisites for `node-pty`, then run `npm install` followed by `npm run dev`. This is a source distribution, not a self-contained native executable; the PTY dependency is compiled for the target operating system during installation.
+The ZIP is written to `dist/NEXARA-package.zip`. This is a source distribution, not a self-contained native executable.
 
-## Architecture
+## Repository layout
 
 - `apps/web`: browser workspace and terminal client.
-- `apps/server`: HTTP API and authenticated PTY/WebSocket session host with bounded session lifecycle controls.
-- `packages/protocol`: versioned and validated client/server messages.
-- `packages/runtime`: execution-backend contract and guest-memory primitives.
-- `packages/x86-core`: bounded x86 interpreter and browser-compatible execution-backend adapter.
-- `packages/workspace`: IndexedDB persistence and an in-memory test adapter.
-- `tests`: protocol, memory, CPU-subset, workspace persistence, and session lifecycle tests.
+- `apps/server`: HTTP API, authenticated session host, and sandbox policy.
+- `packages/protocol`: validated client/server messages.
+- `packages/runtime`: guest memory, paging, and PC device models.
+- `packages/x86-core`: bounded x86 interpreter, descriptor/segment state, TSS and backend adapter.
+- `packages/security`: signed capability-lease policy primitive.
+- `packages/workspace`: browser workspace persistence.
+- `tests`: automated regression suite.
 
-## Compatibility status
+## x86 compatibility status
 
-NEXARA does **not** yet provide full x86 32-bit or x86-64 machine compatibility. The optional MMU mode routes CPU instruction fetches, memory operands, and stack accesses through translation. It supports both direct software mappings and a four-level 48-bit x86-64 page-table walk using guest-physical page-table entries, a configurable CR3 root, present/read-write/user/NX checks, and 4 KiB, 2 MiB, and 1 GiB page leaves. Large-page alignment and reserved-address-bit violations produce reserved-bit page-fault metadata. This remains a partial model: CR0, CR3, CR4 and EFER have validated host-side configuration interfaces, but guest instructions cannot yet execute privileged MOV-to/from-control-register or RDMSR/WRMSR operations. It does not implement PCID, hardware TLB behavior, privilege transitions, or hardware exception delivery. Full compatibility requires instruction execution, privilege and exception semantics, virtual memory, interrupt/timer behavior, firmware and device models, storage, networking, boot support, and Linux ABI conformance. Server PTY sessions execute programs supported by the host OS; they are not virtual machines.
+The x86 core is an **experimental interpreter**, not a hardware-accelerated VM and not a complete x86 implementation. It supports a limited 32/64-bit integer instruction subset. Implemented foundations include guest memory, selected address translation and paging behavior, descriptor-table decoding, segment caches, selected privileged instructions, I/O permission checks using a 32-bit TSS bitmap, PIC/PIT device models, and selected interrupt delivery.
 
-Compatibility and performance claims will be made only against reproducible conformance suites and benchmarks.
+A constrained 32-bit protected-mode interrupt path now supports present IDT interrupt/trap gates, ring-3-to-ring-0 stack switching through a validated busy 32-bit TSS, old SS:ESP frame construction, same-ring frames, and IRET restoration to an outer privilege level. The transition path validates code/stack selectors before changing segment state and writes each frame as one bounded guest-memory operation. **Privilege-changing stack switches are currently rejected when paging is enabled**; page-fault privilege semantics and supervisor writes through the paging backend need to be implemented before enabling that path. Task gates, hardware task switching, call gates, complete fault/exception delivery, nested-fault escalation, complete EFLAGS semantics, 64-bit TSS/IST, and full segmentation semantics remain unsupported.
 
-## Descriptor and interrupt-table groundwork
+The CPU does not yet boot firmware or a disk image, provide a Linux-compatible machine, or run an unmodified guest OS. It does not implement the full x86 ISA, complete APIC/PCI/USB/storage/network device sets, firmware, ACPI, UEFI/BIOS, or Linux ABI. Passing the current regression suite only validates the implemented subset; it is not an x86 conformance or security certification.
 
-`packages/x86-core/src/descriptors.js` provides bounded readers for legacy 8-byte GDT/LDT segment descriptors and 64-bit IDT gates. It decodes selector fields, descriptor attributes, segment base/limit, gate target offsets, IST, gate type, presence, and software-interrupt DPL checks. Table reads are checked against both the architectural table limit and guest physical memory bounds. The CPU now owns GDTR/IDTR/LDTR/task-register state and executes a limited subset of LGDT/LIDT, MOV Sreg, LLDT and LTR instructions. LLDT activates an LDT descriptor view for TI=1 segment selectors, and CPU save-state restoration reconstructs that view from the saved LDTR. LTR accepts available 32-bit TSS descriptors and marks the descriptor busy. Descriptor decoding still does not imply complete privilege transitions, stack switching or exception delivery.
+## Host security boundary
 
-## Security boundary
+The browser is not a host security boundary. The PTY backend runs host processes and is not a VM. The server disables unsandboxed PTY sessions by default; the explicit opt-in is only for trusted local development and is rejected on non-loopback binds. The Docker sandbox policy drops capabilities, disables networking, uses a read-only root filesystem, and applies resource limits. Containers still share the host kernel; even a sandboxed container is not equivalent to a dedicated microVM for hostile guest kernels.
 
-The server defaults to loopback binding. Browser origins are allowlisted, and each PTY session has a separate random secret. Unsandboxed host PTY sessions are now disabled by default; trusted local development can explicitly set NEXARA_ALLOW_UNSANDBOXED_HOST_PTY=true, and this opt-in is rejected on non-loopback binds. This does not make the PTY isolated: it still runs with the server process user's OS privileges. Do not enable it for untrusted users or public deployments. See SECURITY-ARCHITECTURE.md for the required microVM boundary, capability broker, threat model and acceptance gates.
+Before untrusted multi-tenant use, NEXARA still needs a dedicated microVM supervisor, enforceable signed leases, capability-based device and network brokers, per-VM storage isolation, robust image intake, adversarial escape tests, fuzzing, and independent security review. See [SECURITY-ARCHITECTURE.md](SECURITY-ARCHITECTURE.md).
+
+## Current completion estimate
+
+For the broader goal of a **bootable, Linux-capable, securely isolated x86 virtual machine**, the repository is approximately **20% complete**. This is an engineering estimate, not a measured test metric: the workspace and early interpreter foundations exist, but the firmware/boot pipeline, broad x86 compatibility, production microVM supervisor, virtual device stack, Linux guest support, and adversarial security validation are still major unfinished work.
 
 ## Configuration
 
 - `HOST`: bind address (default `127.0.0.1`).
 - `PORT`: HTTP/WebSocket port (default `8787`).
-- `ALLOWED_ORIGINS`: comma-separated browser origins (default `http://localhost:5173`).
-- `NEXARA_MAX_SESSIONS`: maximum concurrent PTY sessions (default `4`).
-- `NEXARA_MAX_SESSIONS_PER_CLIENT`: active sessions per client IP (default `2`).
-- `NEXARA_SESSION_CREATE_LIMIT`: session creation attempts per client per minute (default `8`).
-- `NEXARA_SESSION_IDLE_MS`: idle PTY lifetime in milliseconds (default `1800000`, minimum `60000`).
+- `ALLOWED_ORIGINS`: comma-separated browser origins.
+- `NEXARA_MAX_SESSIONS`: concurrent PTY session ceiling.
+- `NEXARA_MAX_SESSIONS_PER_CLIENT`: active sessions per client ceiling.
+- `NEXARA_SESSION_CREATE_LIMIT`: session creation attempts per client per minute.
+- `NEXARA_SESSION_IDLE_MS`: idle PTY lifetime.
 - `NEXARA_SHELL`: shell executable override.
-- `NEXARA_ALLOW_UNSANDBOXED_HOST_PTY`: explicitly enable the trusted-local-development PTY backend (true only; disabled by default and prohibited on non-loopback binds).
+- `NEXARA_ALLOW_UNSANDBOXED_HOST_PTY`: explicit trusted-local-development opt-in only.
 - `NEXARA_WORKDIR`: initial working directory.
 
 ## License
 
-No license has been selected yet. All rights reserved by default; do not assume this repository grants reuse rights.
-
-### x86 execution core status
-
-The repository contains an experimental, deliberately bounded instruction interpreter and runtime adapter in `packages/x86-core`. The adapter creates 32-bit or 64-bit guest machines, loads bounded bytecode programs, runs them under an instruction budget, and saves/restores CPU plus memory state. Set `virtualMemory: true` when creating a machine to enable the integrated software address-space mapper; the initial mapping is identity-mapped and grants read/write/execute/user access. Its tested subset includes NOP, HLT, selected register/immediate MOV operations, MOVSX/MOVZX byte and word extensions, 64-bit MOVSXD, selected base-register memory operands, LEA, FF-group INC/DEC and indirect CALL/JMP/PUSH, ADD/SUB/AND/OR/XOR/CMP/TEST forms, immediate group-1 arithmetic, byte F6 and word/dword/qword F7 integer groups, stack push/pop, direct and indirect CALL/RET, relative and indirect jumps, selected conditional branches, and CPU-plus-memory save-state restoration. It uses the shared guest-memory primitive and an instruction budget. The optional MMU provides software mappings and four-level guest page-table walking for 4 KiB, 2 MiB and 1 GiB pages, with permission checks, CR3 root selection, and NX enforcement gated by EFER.NXE. The CPU exposes validated CR0/CR3/CR4 and EFER configuration and save-state support. A limited guest instruction subset now includes MOV to/from CR0/CR3/CR4 and RDMSR/WRMSR for EFER; these operations have no CPL/ring privilege checks because a privilege model is not implemented. The interpreter does not implement the complete x86 ISA or addressing forms, byte-register encoding rules, segmentation, privilege levels, interrupt delivery, descriptor tables, floating point/SIMD, firmware, devices, or Linux boot. It must not be described as full x86 compatibility.
-
-## System-table register state
-
-`packages/x86-core/src/system-tables.js` provides bounded architectural state storage for GDTR, IDTR, LDTR and the task register. It validates selector forms, table limits and guest physical-memory bounds, and supports validated snapshots/restoration. This is not instruction execution: LGDT/LIDT/LLDT/LTR, descriptor type resolution, CPL transitions, task switching, interrupt stack frames and IRET are not implemented by this component.
-
-## CPU-integrated segment-cache model
-
-The CPU now owns an `X86SegmentState` instance backed by its GDT view. Segment-cache state is included in CPU snapshots and is restored by re-reading selectors against the restored guest memory and GDTR. The current implementation supports descriptor-validated DS/ES/FS/GS loads, writable SS loads, and validated CS-cache installation for trusted control-transfer code. This is still not full protected-mode execution: complete CR0.PE transition semantics, far CALL/RET, call gates, ring transitions, TSS stack switching, general segment-based linear-address checks and interrupt/IRET delivery remain unimplemented. A limited immediate far JMP path is implemented separately.
-
-
-## Protected-mode instruction subset (experimental)
-
-The interpreter now has an initial 32-bit protected-mode path for selected operations: guest execution of MOV to/from supported segment registers, LGDT/LIDT pseudo-descriptor loads, LLDT and LTR for supported 32-bit GDT system descriptors, and immediate far JMP with CS-cache validation. Instruction fetch applies the cached CS base and enforces the cached CS limit in 32-bit mode. LGDT/LIDT and system-table operations enforce CPL 0 when PE is active. These paths are covered by instruction-level regression tests.
-
-This is not complete protected mode. Real-mode execution and transitions, full descriptor privilege/type semantics, conforming-code edge cases, call gates, far CALL/RET, ring 3 to ring 0 transitions, TSS stack switching, task switching, interrupt/exception delivery, IRET, expand-down/data-segment linear checks, full segment override/address-size behavior, 32-bit paging, and guest Linux boot remain incomplete. LLDT/LTR execution currently supports 32-bit GDT system descriptors only; 64-bit TSS descriptors are not implemented. Do not treat this subset as security isolation or full x86 compatibility.
-
-
-## Signed VM capability leases
-
-`packages/security/src/lease.js` implements server-side HMAC-SHA-256 VM leases bound to a tenant subject and SHA-256 guest-image digest. Leases carry an expiry, bounded CPU/memory/disk quotas, explicit device/file capabilities and explicit egress host allowlists. Verification uses constant-time signature comparison and can bind the lease to the expected subject and image digest. This is a policy primitive, not an isolation boundary: it is not yet connected to a microVM supervisor or device/network broker, and it does not provide revocation or replay prevention by itself. Keep signing keys in a secret manager and do not expose them to browser code.
-
-
-A further constrained 32-bit ring-0 interrupt path supports software INT/INT3 through present IDT interrupt/trap gates and same-privilege IRET frames. It does not implement hardware IRQ routing, exception prioritization/error-code frames, privilege-changing gates, TSS/IST stack switching, nested-fault escalation or full architectural EFLAGS restoration. It must not be used as a kernel-ready interrupt controller.
-
-
-## Legacy 32-bit paging primitive (experimental)
-
-`packages/runtime/src/mmu.js` now includes `X86LegacyPaging32`, a separate non-PAE 32-bit x86 page-table walker. It implements CR3 page-directory selection, two-level PDE/PTE translation, optional CR4.PSE 4 MiB mappings, user/supervisor and writable checks, CR0.WP-style supervisor write protection, page-fault error-code metadata, and hardware-style accessed/dirty bit updates including writes that hit the software TLB.
-
-This class is currently a standalone runtime primitive. It is **not yet wired into X86Cpu's CR0/CR3/CR4 execution or all instruction/data fetches**, so guest code cannot yet rely on it for enforced paging. It does not implement PAE 32-bit paging, global pages, full reserved-bit rules, physical memory-mapped device translation, or architectural page-fault/interrupt delivery.
+No license has been selected. All rights reserved by default; do not assume this repository grants reuse rights.
