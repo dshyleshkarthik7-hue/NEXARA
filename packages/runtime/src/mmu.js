@@ -98,7 +98,7 @@ export class GuestAddressSpace {
     });
   }
 
-  translate(virtualAddress, { write = false, execute = false, user = false } = {}) {
+  translate(virtualAddress, { read = true, write = false, execute = false, user = false } = {}) {
     const virtual = this.#normalize(virtualAddress);
     const key = this.#key(virtual);
     let entry = this.#tlb.get(key);
@@ -107,7 +107,7 @@ export class GuestAddressSpace {
       if (entry) this.#tlb.set(key, entry);
     }
     if (!entry) throw new PageFault(virtual, { write, user, instruction: execute });
-    const allowed = (!write || entry.write) && (!execute || entry.execute)
+    const allowed = (!read || entry.read) && (!write || entry.write) && (!execute || entry.execute)
       && (!user || entry.user) && (!write || entry.read);
     if (!allowed) throw new PageFault(virtual, { present: true, write, user, instruction: execute });
     const physical = entry.physical + (virtual & PAGE_MASK);
