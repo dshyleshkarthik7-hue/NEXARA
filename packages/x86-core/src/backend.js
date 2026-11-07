@@ -1,4 +1,5 @@
 import { ExecutionBackend, GuestMemory } from "../../runtime/src/index.js";
+import { GuestAddressSpace } from "../../runtime/src/mmu.js";
 import { X86Cpu } from "./index.js";
 
 export function parseHexProgram(source) {
@@ -13,10 +14,11 @@ export function parseHexProgram(source) {
 }
 
 export class X86InterpreterMachine {
-  constructor({ mode, memory, entryPoint = 0 }) {
+  constructor({ mode, memory, entryPoint = 0, addressSpace = null }) {
     this.mode = mode;
     this.memory = memory;
-    this.cpu = new X86Cpu({ memory, mode, instructionPointer: entryPoint });
+    this.addressSpace = addressSpace;
+    this.cpu = new X86Cpu({ memory, mode, instructionPointer: entryPoint, addressSpace });
     const stackTop = memory.byteLength - 16;
     this.cpu.setRegister(4, BigInt(stackTop), mode);
   }
@@ -39,8 +41,8 @@ export class X86InterpreterMachine {
   run(options) { return this.cpu.run(options); }
   getRegister(index, width = this.mode) { return this.cpu.getRegister(index, width); }
   setRegister(index, value, width = this.mode) { return this.cpu.setRegister(index, value, width); }
-  readMemory(address, length) { return this.memory.read(address, length); }
-  writeMemory(address, bytes) { return this.memory.write(address, bytes); }
+  readMemory(address, length) { return this.addressSpace ? this.addressSpace.read(BigInt(address), length) : this.memory.read(address, length); }
+  writeMemory(address, bytes) { return this.addressSpace ? this.addressSpace.write(BigInt(address), bytes) : this.memory.write(address, bytes); }
   saveState() { return this.cpu.saveState(); }
   loadState(state) { return this.cpu.loadState(state); }
   get state() {
@@ -64,6 +66,7 @@ export class X86InterpreterBackend extends ExecutionBackend {
       execution: "javascript-interpreter",
       modes: Object.freeze([32, 64]),
       guestMemory: true,
+      virtualMemory: true,
       saveState: true,
       linuxBoot: false,
       completeX86Compatibility: false
@@ -77,6 +80,14 @@ export class X86InterpreterBackend extends ExecutionBackend {
     const entryPoint = configuration.entryPoint ?? 0;
     if (mode !== 32 && mode !== 64) throw new RangeError("mode must be 32 or 64");
     const memory = new GuestMemory({ initialPages: memoryPages, maximumPages });
-    return new X86InterpreterMachine({ mode, memory, entryPoint });
+    let addressSpace = null;
+    if (configuration.virtualMemory === true) {
+      addressSpace = new GuestAddressSpace(memory);
+      for (let page = 0; page < memory.pageCount; page++) {
+        const address = BigInt(page * 4096);
+        addressSpace.map(address, address, { read: true, write: true, execute: true, user: true });
+      }
+    }
+    return new X86InterpreterMachine({ mode, memory, entryPoint, addressSpace });
   }
 }
