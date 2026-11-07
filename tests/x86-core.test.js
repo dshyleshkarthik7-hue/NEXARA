@@ -441,3 +441,21 @@ test("MOVSX and MOVZX support 64-bit destinations", () => {
   unsigned.step();
   assert.equal(unsigned.getRegister(0,64), 0x8001n);
 });
+
+
+test("MOVSX and MOVZX load byte and word values from guest memory", () => {
+  const cpu = cpuFor([0x0f,0xb6,0x03,0x0f,0xbe,0x0b], 32);
+  cpu.setRegister(3, 256n, 32);
+  cpu.memory.write(256, Uint8Array.of(0x80));
+  cpu.step();
+  assert.equal(cpu.getRegister(0,32), 0x80n);
+  cpu.step();
+  assert.equal(cpu.getRegister(1,32), 0xffffff80n);
+});
+
+test("MOVSXD sign-extends a 32-bit operand into a 64-bit register", () => {
+  const cpu = cpuFor([0x48,0x63,0xc3], 64);
+  cpu.setRegister(3, 0x80000001n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(0,64), 0xffffffff80000001n);
+});
