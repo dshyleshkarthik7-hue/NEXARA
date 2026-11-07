@@ -183,7 +183,7 @@ test("opt-in page-fault dispatch pushes CR2 error code and resumes at the handle
 });
 
 test("failed page-fault and double-fault delivery terminates as a triple fault", () => {
-  const { cpu, memory } = setup({ paged: true, exceptionDelivery: true, ring0Stack: 8 });
+  const { cpu, memory } = setup({ paged: true, exceptionDelivery: true, pageFaultGate: false });
   cpu.setRegister(3, 0x2000n, 32);
   memory.write(0x600, Uint8Array.of(0x8b, 0x03));
   assert.throws(() => cpu.step(), /Triple fault/);
