@@ -448,6 +448,9 @@ export class X86Cpu {
           physical = Number(linear);
         }
         const count = Math.min(frame.length - offset, 4096 - Number(linear & 0xfffn));
+        if (!Number.isSafeInteger(physical) || physical < 0 || physical + count > this.memory.byteLength) {
+          throw new RangeError("Interrupt frame exceeds guest physical memory");
+        }
         physicalWrites.push({ physical, bytes: frame.slice(offset, offset + count) });
         offset += count;
       }
