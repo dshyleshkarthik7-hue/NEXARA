@@ -600,3 +600,21 @@ test("F6 and F7 TEST immediate update flags without modifying operands", () => {
   assert.equal(qword.getRegister(3,64), 0xffffffff80000000n);
   assert.equal((qword.flags & (1n << 6n)), 0n);
 });
+
+
+test("CPU owns protected-mode segment state and restores cached selectors", () => {
+  const cpu = cpuFor([0xf4], 32);
+  cpu.memory.write(8, Uint8Array.from([0xff,0xff,0,0,0,0x9a,0xcf,0]));
+  cpu.memory.write(16, Uint8Array.from([0xff,0xff,0,0,0,0x92,0xcf,0]));
+  cpu.segments.installCodeSegment(0x08);
+  cpu.segments.loadStack(0x10);
+  cpu.segments.loadData("ds", 0x10);
+  const snapshot = cpu.snapshot();
+  assert.equal(snapshot.segments.cs.selector, 0x08);
+  assert.equal(snapshot.segments.ss.selector, 0x10);
+  const restored = cpuFor([0xf4], 32);
+  restored.loadState(snapshot);
+  assert.equal(restored.segments.snapshot().cs.selector, 0x08);
+  assert.equal(restored.segments.snapshot().ss.selector, 0x10);
+  assert.equal(restored.segments.snapshot().ds.writable, true);
+});
