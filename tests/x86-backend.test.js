@@ -79,3 +79,15 @@ test("MMU-backed CPU enforces data read and instruction execute permissions", as
   execute.addressSpace.protect(0n, { execute: false });
   assert.throws(() => execute.step(), error => error.name === "PageFault" && error.instruction);
 });
+
+
+test("MMU-backed machine save state restores mappings and permissions", async () => {
+  const backend = new X86InterpreterBackend();
+  const machine = await backend.createMachine({ mode: 32, memoryPages: 2, virtualMemory: true });
+  machine.addressSpace.protect(0x1000n, { read: false, write: false });
+  const state = machine.saveState();
+  machine.addressSpace.protect(0x1000n, { read: true, write: true });
+  assert.deepEqual([...machine.readMemory(0x1000, 1)], [0]);
+  machine.loadState(state);
+  assert.throws(() => machine.readMemory(0x1000, 1), error => error.name === "PageFault" && error.present);
+});
