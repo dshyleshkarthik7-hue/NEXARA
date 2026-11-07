@@ -91,3 +91,15 @@ test("MMU-backed machine save state restores mappings and permissions", async ()
   machine.loadState(state);
   assert.throws(() => machine.readMemory(0x1000, 1), error => error.name === "PageFault" && error.present);
 });
+
+
+test("CPU save state preserves the hardware-style page-table root", async () => {
+  const backend = new X86InterpreterBackend();
+  const machine = await backend.createMachine({ mode: 64, memoryPages: 2, virtualMemory: true });
+  machine.addressSpace.setPageTableRoot(0n);
+  const state = machine.saveState();
+  machine.addressSpace.clearPageTableRoot();
+  assert.equal(machine.addressSpace.pageTableRoot, null);
+  machine.loadState(state);
+  assert.equal(machine.addressSpace.pageTableRoot, 0n);
+});
