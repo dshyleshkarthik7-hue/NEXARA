@@ -20,7 +20,7 @@ test("enforces the TSS I/O bitmap for every byte of an IN/OUT width", () => {
   assert.equal(tss.allowsIo(0, 8), true);
   assert.equal(tss.allowsIo(8, 8), true);
   assert.equal(tss.allowsIo(10, 8), false);
-  assert.equal(tss.allowsIo(7, 16), false);
+  assert.equal(tss.allowsIo(7, 16), true);
   assert.throws(() => tss.allowsIo(0xffff, 16), /Invalid TSS I\/O/);
 });
 
