@@ -359,9 +359,11 @@ export class X86Cpu {
       } else {
         const high = this.getRegister(2, width);
         const low = this.getRegister(0, width);
-        const dividend = extension === 6
-          ? (high << BigInt(width)) | low
-          : signed((high << BigInt(width)) | low);
+        const dividendBits = BigInt(width * 2);
+        const rawDividend = (high << BigInt(width)) | low;
+        const dividend = extension === 6 ? rawDividend
+          : (rawDividend & (1n << (dividendBits - 1n))) !== 0n
+            ? rawDividend - (1n << dividendBits) : rawDividend;
         const divisor = extension === 6 ? operand : signed(operand);
         if (divisor === 0n) throw new CpuFault("Integer divide by zero", start);
         const quotient = dividend / divisor;
