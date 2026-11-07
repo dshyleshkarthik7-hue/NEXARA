@@ -505,3 +505,62 @@ test("FF indirect control transfers reject out-of-range targets", () => {
   cpu.setRegister(0, 4096n, 32);
   assert.throws(() => cpu.step(), /target outside memory/i);
 });
+
+
+test("F6 byte NOT and NEG preserve and update expected flags", () => {
+  const notCpu = cpuFor([0xf6,0xd3], 32);
+  notCpu.setRegister(3, 0x0fn, 8);
+  const flags = notCpu.saveState().flags;
+  notCpu.step();
+  assert.equal(notCpu.getRegister(3,8), 0xf0n);
+  assert.equal(notCpu.saveState().flags, flags);
+
+  const negCpu = cpuFor([0xf6,0xdb], 32);
+  negCpu.setRegister(3, 1n, 8);
+  negCpu.step();
+  assert.equal(negCpu.getRegister(3,8), 0xffn);
+  assert.equal((negCpu.flags & 1n), 1n);
+});
+
+test("F6 byte MUL and IMUL return AX and report overflow", () => {
+  const mul = cpuFor([0xf6,0xe3], 32);
+  mul.setRegister(0, 20n, 8);
+  mul.setRegister(3, 10n, 8);
+  mul.step();
+  assert.equal(mul.getRegister(0,16), 200n);
+  assert.equal((mul.flags & 1n), 0n);
+
+  const imul = cpuFor([0xf6,0xeb], 32);
+  imul.setRegister(0, 0x80n, 8);
+  imul.setRegister(3, 2n, 8);
+  imul.step();
+  assert.equal(imul.getRegister(0,16), 0xff00n);
+  assert.equal((imul.flags & 1n), 1n);
+});
+
+test("F6 byte DIV and IDIV place quotient in AL and remainder in AH", () => {
+  const div = cpuFor([0xf6,0xf3], 32);
+  div.setRegister(0, 100n, 16);
+  div.setRegister(3, 7n, 8);
+  div.step();
+  assert.equal(div.getRegister(0,8), 14n);
+  assert.equal(div.getRegister(0,16) >> 8n, 2n);
+
+  const idiv = cpuFor([0xf6,0xfb], 32);
+  idiv.setRegister(0, 0xff9cn, 16);
+  idiv.setRegister(3, 7n, 8);
+  idiv.step();
+  assert.equal(idiv.getRegister(0,8), 0xf2n);
+  assert.equal(idiv.getRegister(0,16) >> 8n, 0xfen);
+});
+
+test("F6 byte division faults on zero and quotient overflow", () => {
+  const zero = cpuFor([0xf6,0xf3], 32);
+  zero.setRegister(0, 10n, 16);
+  zero.setRegister(3, 0n, 8);
+  assert.throws(() => zero.step(), /divide by zero/i);
+  const overflow = cpuFor([0xf6,0xf3], 32);
+  overflow.setRegister(0, 0x100n, 16);
+  overflow.setRegister(3, 1n, 8);
+  assert.throws(() => overflow.step(), /quotient overflow/i);
+});
