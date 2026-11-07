@@ -10,7 +10,7 @@ import {
 test("workspace paths are normalized and traversal is rejected", () => {
   assert.equal(normalizeWorkspacePath("src\\main.js"), "src/main.js");
   assert.equal(normalizeWorkspacePath("notes/readme.md"), "notes/readme.md");
-  for (const path of ["", "../secret", "/etc/passwd", "src/../../secret", "C:\\secret", ".nexara/config", "bad\\u0000name"]) {
+  for (const path of ["", "../secret", "/etc/passwd", "src/../../secret", "C:\\secret", ".nexara/config", "bad" + String.fromCharCode(0) + "name"]) {
     assert.throws(() => normalizeWorkspacePath(path), TypeError);
   }
 });
