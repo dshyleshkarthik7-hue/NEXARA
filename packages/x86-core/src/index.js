@@ -21,10 +21,12 @@ export class X86Cpu {
   constructor({ memory, mode = 64, instructionPointer = 0, addressSpace = null } = {}) {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
     if (mode !== 32 && mode !== 64) throw new RangeError("mode must be 32 or 64");
-    if (!Number.isSafeInteger(instructionPointer) || instructionPointer < 0 || instructionPointer >= memory.byteLength) {
+    if (!Number.isSafeInteger(instructionPointer) || instructionPointer < 0
+      || (!addressSpace && instructionPointer >= memory.byteLength)) {
       throw new RangeError("instructionPointer is outside guest memory");
     }
     if (addressSpace && addressSpace.memory !== memory) throw new TypeError("addressSpace must use the CPU guest memory");
+    if (addressSpace) addressSpace.translate(BigInt(instructionPointer), { execute: true });
     this.memory = memory;
     this.addressSpace = addressSpace;
     this.mode = mode;
@@ -58,7 +60,7 @@ export class X86Cpu {
   }
 
   #fetch8() {
-    if (this.ip >= this.memory.byteLength) throw new CpuFault("Instruction fetch outside memory", this.ip);
+    if (!this.addressSpace && this.ip >= this.memory.byteLength) throw new CpuFault("Instruction fetch outside memory", this.ip);
     const address = this.ip++;
     return this.addressSpace ? this.addressSpace.fetch(BigInt(address), 1)[0] : this.memory.read(address, 1)[0];
   }
