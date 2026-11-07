@@ -71,6 +71,17 @@ export class X86Cpu {
     if (!this.pendingInterrupts.includes(vector)) this.pendingInterrupts.push(vector);
   }
 
+  /** Deliver a caller-classified protected-mode exception with an optional CPU error code. */
+  deliverException(vector, { errorCode = null, returnIp = this.ip } = {}) {
+    if (!Number.isInteger(vector) || vector < 0 || vector > 255) throw new RangeError("Exception vector must be between 0 and 255");
+    if (!Number.isSafeInteger(returnIp) || returnIp < 0 || returnIp > 0xffffffff) throw new RangeError("Exception return IP must be 32-bit");
+    if (errorCode !== null && (!Number.isInteger(errorCode) || errorCode < 0 || errorCode > 0xffffffff)) {
+      throw new RangeError("Exception error code must be 32-bit");
+    }
+    this.#deliverSoftwareInterrupt(vector, returnIp, this.ip, false, errorCode === null ? null : BigInt(errorCode));
+    return Object.freeze({ vector, errorCode, ip: this.ip });
+  }
+
   readControlRegister(index) {
     if (![0, 2, 3, 4].includes(index)) throw new CpuFault("Unsupported control register", this.ip);
     return this.controlRegisters.get(index);
@@ -423,10 +434,32 @@ export class X86Cpu {
     const frame = new Uint8Array(values.length * 4);
     const view = new DataView(frame.buffer);
     values.forEach((value, index) => view.setUint32(index * 4, Number(BigInt(value) & 0xffffffffn), true));
-    this.#writeLinear(linearAddress, frame, { user: false });
+    const physicalWrites = [];
+    try {
+      let offset = 0;
+      while (offset < frame.length) {
+        const linear = BigInt(linearAddress) + BigInt(offset);
+        let physical;
+        if (this.addressSpace) {
+          physical = this.addressSpace.translate(linear, { write: true, user: false });
+        } else if (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n) {
+          physical = this.legacyPaging32.translate(linear, { write: true, user: false });
+        } else {
+          physical = Number(linear);
+        }
+        const count = Math.min(frame.length - offset, 4096 - Number(linear & 0xfffn));
+        physicalWrites.push({ physical, bytes: frame.slice(offset, offset + count) });
+        offset += count;
+      }
+    } catch (error) {
+      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & this.#mask(this.mode));
+      throw error;
+    }
+    // No guest stack byte is modified until every page in the frame is writable.
+    for (const write of physicalWrites) this.memory.write(write.physical, write.bytes);
   }
 
-  #deliverSoftwareInterrupt(vector, returnIp, start, software = true) {
+  #deliverSoftwareInterrupt(vector, returnIp, start, software = true, errorCode = null) {
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Protected interrupt delivery requires 32-bit protected mode", start);
     try {
       const oldCpl = this.segments.cpl;
@@ -438,8 +471,8 @@ export class X86Cpu {
       }
       const targetCpl = target.dpl;
       const plan = this.segments.prepareCodeTransition(gate.selector, { targetCpl, allowInward: true });
-      if (gate.offset > target.limit || target.base + gate.offset >= BigInt(this.memory.byteLength)) {
-        throw new Error("Interrupt target exceeds code segment or guest memory");
+      if (gate.offset > target.limit || target.base + gate.offset > 0xffffffffn) {
+        throw new Error("Interrupt target exceeds code segment or 32-bit linear address space");
       }
       const oldCs = this.segments.registers.cs.selector;
       const oldSs = this.segments.registers.ss.selector;
@@ -458,24 +491,27 @@ export class X86Cpu {
         nextSs = ringStack.ss;
         stackDescriptor = this.segments.prepareStack(nextSs, { targetCpl });
         const top = BigInt(ringStack.esp);
-        const frameBytes = 20n;
+        const frameBytes = 20n + (errorCode === null ? 0n : 4n);
         if (top < frameBytes) throw new Error("TSS privilege stack underflows");
         nextEsp = top - frameBytes;
         if (nextEsp > stackDescriptor.limit || top - 1n > stackDescriptor.limit) throw new Error("TSS privilege stack exceeds SS limit");
         const linear = stackDescriptor.base + nextEsp;
         if (linear + frameBytes > 4294967296n) throw new Error("TSS privilege stack exceeds 32-bit linear address space");
         frameValues = [BigInt(returnIp), BigInt(oldCs), oldFlags, BigInt(oldEsp), BigInt(oldSs)];
+        if (errorCode !== null) frameValues.unshift(BigInt(errorCode));
         this.#writeInterruptFrame(Number(linear), frameValues, start);
         this.segments.commitPrivilegeTransition(plan, nextSs, stackDescriptor);
       } else {
         if (targetCpl !== oldCpl) throw new Error("Interrupt cannot transfer to an outer privilege ring");
         stackDescriptor = this.segments.registers.ss.cache;
-        if (!stackDescriptor || oldEsp < 12 || BigInt(oldEsp) > stackDescriptor.limit) throw new Error("Current interrupt stack is invalid");
-        nextEsp = BigInt(oldEsp - 12);
-        if (nextEsp + 11n > stackDescriptor.limit) throw new Error("Interrupt frame exceeds SS limit");
+        const frameBytes = 12n + (errorCode === null ? 0n : 4n);
+        if (!stackDescriptor || BigInt(oldEsp) < frameBytes || BigInt(oldEsp) > stackDescriptor.limit) throw new Error("Current interrupt stack is invalid");
+        nextEsp = BigInt(oldEsp) - frameBytes;
+        if (nextEsp + frameBytes - 1n > stackDescriptor.limit) throw new Error("Interrupt frame exceeds SS limit");
         const linear = stackDescriptor.base + nextEsp;
-        if (linear + 12n > 4294967296n) throw new Error("Interrupt frame exceeds 32-bit linear address space");
+        if (linear + frameBytes > 4294967296n) throw new Error("Interrupt frame exceeds 32-bit linear address space");
         frameValues = [BigInt(returnIp), BigInt(oldCs), oldFlags];
+        if (errorCode !== null) frameValues.unshift(BigInt(errorCode));
         this.#writeInterruptFrame(Number(linear), frameValues, start);
         this.segments.installCodeSegment(gate.selector);
       }
