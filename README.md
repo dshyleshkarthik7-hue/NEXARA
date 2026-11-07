@@ -6,7 +6,7 @@ NEXARA combines a lightweight editor, browser terminal client, server session ga
 
 ## Current implementation
 
-- Browser workspace with a lightweight editor, multi-file navigation, IndexedDB autosave, text-file import/export, and keyboard save/open shortcuts.
+- Browser workspace with a lightweight editor, multi-file navigation, IndexedDB autosave, text-file import/export, keyboard save/open shortcuts, and a local x86 bytecode runner for the implemented instruction subset.
 - IndexedDB-backed browser file storage with bounded text files, normalized paths, per-file revisions, and stale-write conflict detection.
 - Server-side PTY sessions over WebSocket.
 - Per-session random credentials, constant-time credential comparison, WebSocket origin allowlisting, bounded input, and a configurable session ceiling.
