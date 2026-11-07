@@ -312,6 +312,11 @@ export class X86LegacyPaging32 {
     if (cached) {
       const denied = (user && !cached.user) || (write && !cached.writable && (user || this.writeProtect));
       if (denied) throw new PageFault(linear, { present: true, write, user, instruction: execute });
+      if (write && cached.dirtyAddress !== null && !cached.dirty) {
+        const leaf = this.#read32(cached.dirtyAddress) | 0x40;
+        this.#write32(cached.dirtyAddress, leaf);
+        cached.dirty = true;
+      }
       return Number(cached.physical | (linear & 0xfffn));
     }
 
@@ -372,7 +377,7 @@ export class X86LegacyPaging32 {
       throw new PageFault(linear, { present: true, write, user, reserved: true, instruction: execute });
     }
     const pageBase = linear & ~0xfffn;
-    this.#tlb.set(pageBase, { physical: physical & ~0xfffn, writable, user: userAllowed });
+    this.#tlb.set(pageBase, { physical: physical & ~0xfffn, writable, user: userAllowed, dirtyAddress: large ? pdeAddress : pteAddress, dirty: large ? (pde & 0x40) !== 0 : (pte & 0x40) !== 0 });
     return Number(physical);
   }
 
