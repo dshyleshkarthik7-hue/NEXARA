@@ -1,6 +1,7 @@
 import { GuestMemory } from "../../runtime/src/index.js";
 
 const U32_MAX = 0xffffffffn;
+const U64_MASK = 0xffffffffffffffffn;
 
 /**
  * Bounds-checked 32-bit TSS view for privilege-stack and I/O-bitmap state.
