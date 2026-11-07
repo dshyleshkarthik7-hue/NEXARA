@@ -49,6 +49,8 @@ The current server starts node-pty shells as the server process user. That is no
 
 The x86 interpreter is experimental and incomplete. A signed capability-lease primitive exists in packages/security, but it is not yet enforced by a supervisor. No microVM supervisor, hardware virtualization backend, virtual device broker, firmware implementation, bootable guest image pipeline or Linux shell has been completed.
 
+The CPU now has a narrowly scoped 32-bit protected-mode ring-transition implementation: validated GDT system-descriptor decoding and LTR for an available 32-bit TSS, TSS ring-stack selection, present non-conforming IDT code-target validation, ring-3-to-ring-0 interrupt frames (including old SS:ESP), atomic segment-cache/CPL commit after the frame write, and outer-ring IRET restoration. Regression tests cover the normal transition, IRET, invalid stack selectors, absent target code descriptors, stack underflow and out-of-guest-memory frame writes. This path is not enabled as a security boundary: privilege-changing stack switches are explicitly rejected while paging is active, exception delivery and nested-fault escalation are incomplete, and the CPU still lacks broad x86/firmware/device/boot support. The current CI run for the implementation commit passed all 160 tests and the browser build/package job.
+
 ## Acceptance gates before public/untrusted use
 
 - Demonstrate a guest escape test suite against the selected microVM/hypervisor boundary.
