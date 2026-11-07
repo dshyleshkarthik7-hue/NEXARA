@@ -407,3 +407,37 @@ test("F7 DIV faults on zero divisor and quotient overflow", () => {
   overflow.setRegister(3, 1n, 32);
   assert.throws(() => overflow.step(), /quotient overflow/i);
 });
+
+
+test("MOVZX zero-extends byte and word register operands", () => {
+  const byte = cpuFor([0x0f,0xb6,0xc3], 32);
+  byte.setRegister(3, 0xabcdef80n, 32);
+  byte.step();
+  assert.equal(byte.getRegister(0,32), 0x80n);
+  const word = cpuFor([0x0f,0xb7,0xc3], 32);
+  word.setRegister(3, 0xabcdef80n, 32);
+  word.step();
+  assert.equal(word.getRegister(0,32), 0xef80n);
+});
+
+test("MOVSX sign-extends byte and word operands into 32-bit registers", () => {
+  const byte = cpuFor([0x0f,0xbe,0xc3], 32);
+  byte.setRegister(3, 0x80n, 32);
+  byte.step();
+  assert.equal(byte.getRegister(0,32), 0xffffff80n);
+  const word = cpuFor([0x0f,0xbf,0xc3], 32);
+  word.setRegister(3, 0x8001n, 32);
+  word.step();
+  assert.equal(word.getRegister(0,32), 0xffff8001n);
+});
+
+test("MOVSX and MOVZX support 64-bit destinations", () => {
+  const signed = cpuFor([0x48,0x0f,0xbe,0xc3], 64);
+  signed.setRegister(3, 0x80n, 32);
+  signed.step();
+  assert.equal(signed.getRegister(0,64), 0xffffffffffffff80n);
+  const unsigned = cpuFor([0x48,0x0f,0xb7,0xc3], 64);
+  unsigned.setRegister(3, 0xffff8001n, 32);
+  unsigned.step();
+  assert.equal(unsigned.getRegister(0,64), 0x8001n);
+});
