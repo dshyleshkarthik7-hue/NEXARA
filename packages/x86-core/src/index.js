@@ -338,6 +338,36 @@ export class X86Cpu {
       this.flags &= ~(CF | OF);
       if (overflow) this.flags |= CF | OF;
       this.setRegister(decoded.reg, result, width);
+    } else if (opcode === 0xf6) {
+      const decoded = this.#decodeModRM(rex, addressWidth);
+      const extension = decoded.reg & 7;
+      if (![2, 3, 4, 5, 6, 7].includes(extension)) throw new CpuFault("Unsupported F6 byte extension", start);
+      const operand = this.#readOperand(decoded.operand, 8);
+      if (extension === 2) {
+        this.#writeOperand(decoded.operand, (~operand) & 0xffn, 8);
+      } else if (extension === 3) {
+        const result = this.#alu("sub", 0n, operand, 8);
+        this.#writeOperand(decoded.operand, result, 8);
+      } else if (extension === 4 || extension === 5) {
+        const accumulator = this.getRegister(0, 8);
+        const signed = value => (value & 0x80n) !== 0n ? value - 0x100n : value;
+        const product = extension === 4 ? accumulator * operand : signed(accumulator) * signed(operand);
+        this.setRegister(0, product, 16);
+        const overflow = extension === 4 ? (product >> 8n) !== 0n : signed(product & 0xffn) !== product;
+        this.flags &= ~(CF | OF);
+        if (overflow) this.flags |= CF | OF;
+      } else {
+        const rawDividend = this.getRegister(0, 16);
+        const dividend = extension === 6 ? rawDividend : ((rawDividend & 0x8000n) !== 0n ? rawDividend - 0x10000n : rawDividend);
+        const divisor = extension === 6 ? operand : ((operand & 0x80n) !== 0n ? operand - 0x100n : operand);
+        if (divisor === 0n) throw new CpuFault("Integer divide by zero", start);
+        const quotient = dividend / divisor;
+        const remainder = dividend % divisor;
+        const min = extension === 6 ? 0n : -128n;
+        const max = extension === 6 ? 255n : 127n;
+        if (quotient < min || quotient > max) throw new CpuFault("Integer division quotient overflow", start);
+        this.setRegister(0, ((remainder & 0xffn) << 8n) | (quotient & 0xffn), 16);
+      }
     } else if (opcode === 0xf7) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       const extension = decoded.reg & 7;
