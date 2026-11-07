@@ -22,7 +22,7 @@ export class CpuFault extends Error {
  * Experimental x86 interpreter, not a complete x86 implementation.
  * Supports a limited integer instruction subset in 32-bit and 64-bit modes.
  * Includes an experimental partial paging model and limited control-register/MSR instructions.
- * No CPL/ring privilege model, segmentation, interrupt delivery, FPU/SIMD, or devices.
+ * Includes a bounded protected-mode ring-transition subset; not a complete x86 implementation.
  */
 export class X86Cpu {
   constructor({ memory, mode = 64, instructionPointer = 0, addressSpace = null, legacyPaging32 = null, ioBus = null } = {}) {
@@ -427,7 +427,7 @@ export class X86Cpu {
   }
 
   #deliverSoftwareInterrupt(vector, returnIp, start, software = true) {
-    if (this.mode !== 32) throw new CpuFault("Protected interrupt delivery currently supports 32-bit mode only", start);
+    if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Protected interrupt delivery requires 32-bit protected mode", start);
     try {
       const oldCpl = this.segments.cpl;
       const gate = this.idt.readGate(vector, { cpl: oldCpl, software });
@@ -490,7 +490,7 @@ export class X86Cpu {
   }
 
   #returnFromInterrupt(start) {
-    if (this.mode !== 32) throw new CpuFault("IRET currently supports 32-bit mode only", start);
+    if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("IRET requires 32-bit protected mode", start);
     try {
       const stack = this.segments.registers.ss.cache;
       const esp = this.getRegister(4, 32);
