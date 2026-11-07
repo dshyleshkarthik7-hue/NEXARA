@@ -4,7 +4,7 @@ import { X86SystemTableState } from "./system-tables.js";
 export { X86Tss32, X86Tss64 } from "./task-state.js";
 import { X86DescriptorTable } from "./descriptors.js";
 import { X86SegmentState } from "./segments.js";
-import { X86Tss32 } from "./task-state.js";
+import { X86Tss32, X86Tss64 } from "./task-state.js";
 
 const REG_NAMES = ["rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15"];
 const CF = 1n, PF = 1n << 2n, ZF = 1n << 6n, SF = 1n << 7n, OF = 1n << 11n;
@@ -74,7 +74,7 @@ export class X86Cpu {
   /** Deliver a caller-classified protected-mode exception with an optional CPU error code. */
   deliverException(vector, { errorCode = null, returnIp = this.ip } = {}) {
     if (!Number.isInteger(vector) || vector < 0 || vector > 255) throw new RangeError("Exception vector must be between 0 and 255");
-    if (!Number.isSafeInteger(returnIp) || returnIp < 0 || returnIp > 0xffffffff) throw new RangeError("Exception return IP must be 32-bit");
+    if (!Number.isSafeInteger(returnIp) || returnIp < 0 || (this.mode === 32 && returnIp > 0xffffffff)) throw new RangeError("Exception return IP is outside interpreter range");
     if (errorCode !== null && (!Number.isInteger(errorCode) || errorCode < 0 || errorCode > 0xffffffff)) {
       throw new RangeError("Exception error code must be 32-bit");
     }
@@ -462,7 +462,91 @@ export class X86Cpu {
     for (const write of physicalWrites) this.memory.write(write.physical, write.bytes);
   }
 
+  #writeInterruptFrame64(linearAddress, values) {
+    const frame = new Uint8Array(values.length * 8);
+    const view = new DataView(frame.buffer);
+    values.forEach((value, index) => view.setBigUint64(index * 8, BigInt(value) & 0xffffffffffffffffn, true));
+    const physicalWrites = [];
+    let offset = 0;
+    while (offset < frame.length) {
+      const linear = BigInt(linearAddress) + BigInt(offset);
+      if (linear < 0n || linear > 0xffffffffffffffffn) throw new RangeError("Long-mode interrupt stack address overflow");
+      let physical;
+      if (this.addressSpace) physical = this.addressSpace.translate(linear, { write: true, user: false });
+      else {
+        if (linear > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Long-mode stack address exceeds host safe integer range");
+        physical = Number(linear);
+      }
+      const count = Math.min(frame.length - offset, 4096 - Number(linear & 0xfffn));
+      if (!Number.isSafeInteger(physical) || physical < 0 || physical + count > this.memory.byteLength) {
+        throw new RangeError("Long-mode interrupt frame exceeds guest physical memory");
+      }
+      physicalWrites.push({ physical, bytes: frame.slice(offset, offset + count) });
+      offset += count;
+    }
+    // Preflight every translated page before modifying any guest stack byte.
+    for (const write of physicalWrites) this.memory.write(write.physical, write.bytes);
+  }
+
+  #deliverLongModeInterrupt(vector, returnIp, start, software = true, errorCode = null) {
+    if (this.mode !== 64 || (this.controlRegisters.get(0) & 1n) === 0n) {
+      throw new CpuFault("Long-mode interrupt delivery requires protected mode", start);
+    }
+    try {
+      const oldCpl = this.segments.cpl;
+      const gate = this.idt.readGate(vector, { cpl: oldCpl, software });
+      const target = this.gdt.readSegment(gate.selector, { cpl: 0 });
+      if (!target || !target.executable || !target.present || target.conforming || !target.long || target.defaultSize) {
+        throw new Error("Long-mode IDT target must be a present 64-bit non-conforming code segment");
+      }
+      const targetCpl = target.dpl;
+      const plan = this.segments.prepareCodeTransition(gate.selector, { targetCpl, allowInward: true });
+      if (gate.offset > 0x00007fffffffffff n || gate.offset > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error("Long-mode interrupt target is not representable by this interpreter");
+      }
+      const oldCs = this.segments.registers.cs.selector;
+      const oldSs = this.segments.registers.ss.selector;
+      const oldRsp = this.getRegister(4, 64);
+      const oldFlags = this.flags;
+      const stackSwitch = gate.ist !== 0 || targetCpl < oldCpl;
+      let nextRsp;
+      let frameValues;
+      if (stackSwitch) {
+        const task = this.systemTables.task;
+        if (!task.usable || !task.present || !task.busy || task.limit < 0x67) {
+          throw new Error("Long-mode stack switch requires a present busy 64-bit TSS");
+        }
+        const tss = new X86Tss64(this.memory, { base: task.base, limit: task.limit });
+        const top = gate.ist !== 0 ? tss.getIst(gate.ist) : tss.getRsp(targetCpl);
+        if (top === 0n) throw new Error("Selected TSS RSP/IST stack pointer is null");
+        const frameBytes = 40n + (errorCode === null ? 0n : 8n);
+        if (top < frameBytes) throw new Error("Long-mode TSS stack underflows");
+        nextRsp = top - frameBytes;
+        frameValues = [BigInt(returnIp), BigInt(oldCs), oldFlags, oldRsp, BigInt(oldSs)];
+        if (errorCode !== null) frameValues.unshift(BigInt(errorCode));
+        this.#writeInterruptFrame64(nextRsp, frameValues);
+        this.segments.commitLongModePrivilegeTransition(plan);
+      } else {
+        const frameBytes = 24n + (errorCode === null ? 0n : 8n);
+        if (oldRsp < frameBytes) throw new Error("Long-mode interrupt stack underflows");
+        nextRsp = oldRsp - frameBytes;
+        frameValues = [BigInt(returnIp), BigInt(oldCs), oldFlags];
+        if (errorCode !== null) frameValues.unshift(BigInt(errorCode));
+        this.#writeInterruptFrame64(nextRsp, frameValues);
+        this.segments.installCodeSegment(gate.selector);
+      }
+      this.setRegister(4, nextRsp, 64);
+      this.ip = Number(gate.offset);
+      if (gate.interruptGate) this.flags &= ~(1n << 9n);
+      this.flags &= ~(1n << 8n);
+    } catch (error) {
+      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & this.#mask(64));
+      throw new CpuFault(error.message, start);
+    }
+  }
+
   #deliverSoftwareInterrupt(vector, returnIp, start, software = true, errorCode = null) {
+    if (this.mode === 64) return this.#deliverLongModeInterrupt(vector, returnIp, start, software, errorCode);
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Protected interrupt delivery requires 32-bit protected mode", start);
     try {
       const oldCpl = this.segments.cpl;
@@ -525,7 +609,45 @@ export class X86Cpu {
     } catch (error) { throw new CpuFault(error.message, start); }
   }
 
+  #returnFromLongModeInterrupt(start) {
+    if ((this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("IRET requires protected mode", start);
+    try {
+      const rsp = this.getRegister(4, 64);
+      if (rsp > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("IRET stack address exceeds host safe integer range");
+      const frame = this.#readLinear(Number(rsp), 24);
+      const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+      const targetIp = view.getBigUint64(0, true);
+      const selector = Number(view.getBigUint64(8, true) & 0xffffn);
+      const restoredFlags = view.getBigUint64(16, true);
+      if (targetIp > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("IRET target exceeds interpreter address range");
+      const targetCpl = selector & 3;
+      if (targetCpl === this.segments.cpl) {
+        const plan = this.segments.prepareCodeTransition(selector, { targetCpl, allowInward: false });
+        if (!plan.cache.long || plan.cache.defaultSize) throw new Error("IRET target is not a 64-bit code segment");
+        this.segments.installCodeSegment(selector);
+        this.setRegister(4, rsp + 24n, 64);
+      } else if (targetCpl > this.segments.cpl) {
+        if (rsp > BigInt(Number.MAX_SAFE_INTEGER - 40)) throw new Error("Outer IRET frame exceeds host address range");
+        const outer = this.#readLinear(Number(rsp), 40);
+        const full = new DataView(outer.buffer, outer.byteOffset, outer.byteLength);
+        const outerRsp = full.getBigUint64(24, true);
+        const outerSs = Number(full.getBigUint64(32, true) & 0xffffn);
+        const plan = this.segments.prepareCodeReturn(selector);
+        if (!plan.cache.long || plan.cache.defaultSize) throw new Error("IRET target is not a 64-bit code segment");
+        const stackDescriptor = this.segments.prepareLongModeStackReturn(outerSs, { targetCpl });
+        if (outerRsp > 0xffffffffffffffffn) throw new Error("Restored RSP is outside 64-bit range");
+        this.segments.commitLongModeReturn(plan, outerSs, stackDescriptor);
+        this.setRegister(4, outerRsp, 64);
+      } else {
+        throw new Error("IRET cannot return to a more privileged ring");
+      }
+      this.ip = Number(targetIp);
+      this.flags = (restoredFlags & 0x003f7fd7n) | 2n;
+    } catch (error) { throw new CpuFault(error.message, start); }
+  }
+
   #returnFromInterrupt(start) {
+    if (this.mode === 64) return this.#returnFromLongModeInterrupt(start);
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("IRET requires 32-bit protected mode", start);
     try {
       const stack = this.segments.registers.ss.cache;
