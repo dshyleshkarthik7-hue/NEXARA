@@ -277,3 +277,34 @@ test("supports 64-bit immediate shifts and treats a zero count as a no-op", () =
   assert.equal(cpu.getRegister(0,64), 0x8000000000000000n);
   assert.equal(cpu.saveState().flags, flags);
 });
+
+
+test("supports signed two-operand IMUL and negative products", () => {
+  const cpu = cpuFor([0x0f,0xaf,0xc8], 32);
+  cpu.setRegister(0, 0xfffffff dn, 32);
+  cpu.setRegister(1, 7n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(1,32), 0xffffffebn);
+  const flags = BigInt(cpu.saveState().flags);
+  assert.equal((flags & (1n << 0n)) !== 0n, false);
+  assert.equal((flags & (1n << 11n)) !== 0n, false);
+});
+
+test("IMUL sets carry and overflow when the signed product is truncated", () => {
+  const cpu = cpuFor([0x0f,0xaf,0xc8], 32);
+  cpu.setRegister(0, 0x7fffffffn, 32);
+  cpu.setRegister(1, 2n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(1,32), 0xfffffffen);
+  const flags = BigInt(cpu.saveState().flags);
+  assert.equal((flags & (1n << 0n)) !== 0n, true);
+  assert.equal((flags & (1n << 11n)) !== 0n, true);
+});
+
+test("supports 64-bit signed IMUL with REX.W", () => {
+  const cpu = cpuFor([0x48,0x0f,0xaf,0xc8], 64);
+  cpu.setRegister(0, 0xfffffffffffffffen, 64);
+  cpu.setRegister(1, 9n, 64);
+  cpu.step();
+  assert.equal(cpu.getRegister(1,64), 0xfffffffffffffff2n);
+});
