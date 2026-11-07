@@ -96,3 +96,10 @@ The repository contains an experimental, deliberately bounded instruction interp
 ## CPU-integrated segment-cache model
 
 The CPU now owns an `X86SegmentState` instance backed by its GDT view. Segment-cache state is included in CPU snapshots and is restored by re-reading selectors against the restored guest memory and GDTR. The current implementation supports descriptor-validated DS/ES/FS/GS loads, writable SS loads, and validated CS-cache installation for trusted control-transfer code. This is still not full protected-mode execution: instruction decoding for MOV Sreg and LGDT/LIDT/LLDT/LTR, CR0.PE transitions, far control transfers, call gates, ring transitions, stack switching, segment-based linear-address checks and interrupt/IRET delivery remain unimplemented.
+
+
+## Protected-mode instruction subset (experimental)
+
+The interpreter now has an initial 32-bit protected-mode path for selected operations: guest execution of MOV to/from supported segment registers, LGDT/LIDT pseudo-descriptor loads, LLDT and LTR for supported 32-bit GDT system descriptors, and immediate far JMP with CS-cache validation. Instruction fetch applies the cached CS base and enforces the cached CS limit in 32-bit mode. LGDT/LIDT and system-table operations enforce CPL 0 when PE is active. These paths are covered by instruction-level regression tests.
+
+This is not complete protected mode. Real-mode execution and transitions, full descriptor privilege/type semantics, conforming-code edge cases, call gates, far CALL/RET, ring 3 to ring 0 transitions, TSS stack switching, task switching, interrupt/exception delivery, IRET, expand-down/data-segment linear checks, full segment override/address-size behavior, 32-bit paging, and guest Linux boot remain incomplete. LLDT/LTR execution currently supports 32-bit GDT system descriptors only; 64-bit TSS descriptors are not implemented. Do not treat this subset as security isolation or full x86 compatibility.
