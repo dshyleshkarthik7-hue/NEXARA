@@ -91,7 +91,7 @@ export class X86SystemTableState {
         present: value.present, usable: value.usable, ...(hasBusy ? { busy: value.busy } : {}) };
     };
     const ldtr = validateSegment(state.ldtr, "LDTR", true, false);
-    const task = validateSegment(state.task, "Task register", false, true);
+    const task = validateSegment(state.task, "Task register", true, true);
     this.gdtr = gdtr; this.idtr = idtr; this.ldtr = ldtr; this.task = task;
     return this.snapshot();
   }
