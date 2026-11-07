@@ -53,3 +53,28 @@ test("PC/AT fabric satisfies the CPU I/O bus contract with byte-only device widt
   assert.throws(() => fabric.read(0x21, 16), /byte reads only/);
   assert.throws(() => fabric.write(0x21, 0x1234n, 16), /byte writes only/);
 });
+
+
+test("ring-3 I/O permissions are checked against the loaded TSS bitmap", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  memory.write(0, Uint8Array.from([0xe4, 0x40, 0xf4])); // IN AL,0x40
+  const ioBus = { read() { return 0x7b; }, write() {} };
+  const cpu = new X86Cpu({ memory, mode: 32, ioBus });
+  cpu.segments.setCpl(3);
+  cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x400, limit: 0x1ff, present: true, busy: true });
+  // TSS I/O-map base at offset 102; bitmap at offset 104. Port 0x40 bit is clear.
+  memory.write(0x400 + 102, Uint8Array.of(104, 0));
+  memory.write(0x400 + 104, new Uint8Array(32));
+  cpu.step();
+  assert.equal(cpu.getRegister(0, 8), 0x7bn);
+
+  const deniedMemory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  deniedMemory.write(0, Uint8Array.from([0xe4, 0x40]));
+  const denied = new X86Cpu({ memory: deniedMemory, mode: 32, ioBus });
+  denied.segments.setCpl(3);
+  denied.systemTables.loadTaskRegister({ selector: 0x28, base: 0x400, limit: 0x1ff, present: true, busy: true });
+  deniedMemory.write(0x400 + 102, Uint8Array.of(104, 0));
+  const bitmap = new Uint8Array(32); bitmap[8] = 1;
+  deniedMemory.write(0x400 + 104, bitmap);
+  assert.throws(() => denied.step(), /TSS I\/O bitmap denies/);
+});
