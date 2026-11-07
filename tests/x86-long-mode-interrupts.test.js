@@ -1,12 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { GuestMemory } from "../packages/runtime/src/index.js";
+import { GuestAddressSpace } from "../packages/runtime/src/mmu.js";
 import { X86Tss64 } from "../packages/x86-core/src/task-state.js";
 import { X86Cpu } from "../packages/x86-core/src/index.js";
 
-function setupLongMode({ ist = 0 } = {}) {
+function setupLongMode({ ist = 0, addressSpaceEnabled = false } = {}) {
   const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
-  const cpu = new X86Cpu({ memory, mode: 64, instructionPointer: 0x600 });
+  const addressSpace = addressSpaceEnabled ? new GuestAddressSpace(memory) : null;
+  if (addressSpace) {
+    addressSpace.map(0x0000n, 0x0000n, { write: true, execute: true, user: true });
+    addressSpace.map(0x2000n, 0x2000n, { write: true, execute: true, user: false });
+    addressSpace.map(0x4000n, 0x4000n, { write: true, execute: true, user: true });
+  }
+  const cpu = new X86Cpu({ memory, mode: 64, instructionPointer: 0x600, addressSpace });
   const gdtBase = 0x100;
   const idtBase = 0x1000;
   const putSegment = (index, access, flags = 0) => {
@@ -91,4 +98,14 @@ test("long-mode exception entry places a 32-bit error code in an eight-byte fram
   assert.equal(frame.getBigUint64(16, true), 0x1bn);
   assert.equal(frame.getBigUint64(32, true), 0x4800n);
   assert.equal(frame.getBigUint64(40, true), 0x23n);
+});
+
+test("long-mode interrupt frame writes through supervisor-only virtual mapping", () => {
+  const { cpu, memory } = setupLongMode({ addressSpaceEnabled: true });
+  cpu.step();
+  assert.equal(cpu.segments.cpl, 0);
+  assert.equal(cpu.getRegister(4, 64), 0x3000n - 40n);
+  const frame = new DataView(memory.read(0x2000 + 0xfd8, 40).buffer);
+  assert.equal(frame.getBigUint64(0, true), 0x602n);
+  assert.equal(frame.getBigUint64(24, true), 0x4800n);
 });
