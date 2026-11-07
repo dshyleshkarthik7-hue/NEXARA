@@ -18,13 +18,15 @@ export class CpuFault extends Error {
  * No privilege model, segmentation, paging, interrupts, FPU/SIMD, or devices.
  */
 export class X86Cpu {
-  constructor({ memory, mode = 64, instructionPointer = 0 } = {}) {
+  constructor({ memory, mode = 64, instructionPointer = 0, addressSpace = null } = {}) {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
     if (mode !== 32 && mode !== 64) throw new RangeError("mode must be 32 or 64");
     if (!Number.isSafeInteger(instructionPointer) || instructionPointer < 0 || instructionPointer >= memory.byteLength) {
       throw new RangeError("instructionPointer is outside guest memory");
     }
+    if (addressSpace && addressSpace.memory !== memory) throw new TypeError("addressSpace must use the CPU guest memory");
     this.memory = memory;
+    this.addressSpace = addressSpace;
     this.mode = mode;
     this.ip = instructionPointer;
     this.registers = Array.from({ length: 16 }, () => 0n);
@@ -57,7 +59,8 @@ export class X86Cpu {
 
   #fetch8() {
     if (this.ip >= this.memory.byteLength) throw new CpuFault("Instruction fetch outside memory", this.ip);
-    return this.memory.read(this.ip++, 1)[0];
+    const address = this.ip++;
+    return this.addressSpace ? this.addressSpace.fetch(BigInt(address), 1)[0] : this.memory.read(address, 1)[0];
   }
   #fetchUnsigned(bytes) {
     let value = 0n;
@@ -132,7 +135,7 @@ export class X86Cpu {
   #readOperand(operand, width) {
     if (operand.kind === "register") return this.getRegister(operand.index, width);
     const bytes = width / 8;
-    const data = this.memory.read(operand.address, bytes);
+    const data = this.addressSpace ? this.addressSpace.read(BigInt(operand.address), bytes) : this.memory.read(operand.address, bytes);
     let value = 0n;
     for (let i = 0; i < bytes; i++) value |= BigInt(data[i]) << BigInt(i * 8);
     return value;
@@ -144,7 +147,8 @@ export class X86Cpu {
     const v = BigInt(value) & this.#mask(width);
     const data = new Uint8Array(bytes);
     for (let i = 0; i < bytes; i++) data[i] = Number((v >> BigInt(i * 8)) & 0xffn);
-    this.memory.write(operand.address, data);
+    if (this.addressSpace) this.addressSpace.write(BigInt(operand.address), data);
+    else this.memory.write(operand.address, data);
   }
 
   #setArithmeticFlags(result, a, b, width, operation) {
@@ -206,7 +210,7 @@ export class X86Cpu {
 
   #branch(displacement, start) {
     const target = this.ip + Number(displacement);
-    if (!Number.isSafeInteger(target) || target < 0 || target >= this.memory.byteLength) {
+    if (!Number.isSafeInteger(target) || target < 0 || (!this.addressSpace && target >= this.memory.byteLength)) {
       throw new CpuFault("Branch target outside memory", start);
     }
     this.ip = target;
@@ -432,7 +436,8 @@ export class X86Cpu {
         this.#writeOperand(decoded.operand, result, arithmeticWidth);
       } else if (extension === 2 || extension === 4) {
         const target = value & this.#mask(this.mode);
-        if (target >= BigInt(this.memory.byteLength)) throw new CpuFault("Indirect branch target outside memory", start);
+        if (!this.addressSpace && target >= BigInt(this.memory.byteLength)) throw new CpuFault("Indirect branch target outside memory", start);
+        if (target > BigInt(Number.MAX_SAFE_INTEGER)) throw new CpuFault("Indirect branch target exceeds host safe integer range", start);
         if (extension === 2) this.#push(BigInt(this.ip), this.#stackWidth(width));
         this.ip = Number(target);
       } else if (extension === 6) {
@@ -472,7 +477,8 @@ export class X86Cpu {
     } else if (opcode === 0xc3) {
       const target = this.#pop(this.#stackWidth(width));
       const normalized = target & this.#mask(this.mode);
-      if (normalized >= BigInt(this.memory.byteLength)) throw new CpuFault("Return target outside memory", start);
+      if (!this.addressSpace && normalized >= BigInt(this.memory.byteLength)) throw new CpuFault("Return target outside memory", start);
+      if (normalized > BigInt(Number.MAX_SAFE_INTEGER)) throw new CpuFault("Return target exceeds host safe integer range", start);
       this.ip = Number(normalized);
     } else if (opcode >= 0x70 && opcode <= 0x7f) {
       const displacement = this.#fetchSigned(1);
