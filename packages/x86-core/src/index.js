@@ -319,6 +319,20 @@ export class X86Cpu {
       const decoded = this.#decodeModRM(rex, addressWidth);
       if (decoded.operand.kind !== "memory") throw new CpuFault("LEA requires a memory addressing form", start);
       this.setRegister(decoded.reg, BigInt(decoded.operand.address), width);
+    } else if (opcode === 0x69 || opcode === 0x6b) {
+      const decoded = this.#decodeModRM(rex, addressWidth);
+      const immediate = this.#fetchSigned(opcode === 0x6b ? 1 : (width === 16 ? 2 : 4));
+      const signExtend = value => {
+        const sign = 1n << BigInt(width - 1);
+        const normalized = value & this.#mask(width);
+        return (normalized & sign) !== 0n ? normalized - (1n << BigInt(width)) : normalized;
+      };
+      const product = signExtend(this.#readOperand(decoded.operand, width)) * immediate;
+      const result = product & this.#mask(width);
+      const overflow = signExtend(result) !== product;
+      this.flags &= ~(CF | OF);
+      if (overflow) this.flags |= CF | OF;
+      this.setRegister(decoded.reg, result, width);
     } else if (opcode === 0xf7) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       const extension = decoded.reg & 7;
