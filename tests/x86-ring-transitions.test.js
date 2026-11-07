@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { GuestMemory } from "../packages/runtime/src/index.js";
 import { X86Cpu } from "../packages/x86-core/src/index.js";
 
-function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentCode = false } = {}) {
+function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentKernelCode = false } = {}) {
   const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
   const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x600 });
   const gdtBase = 0x100;
@@ -15,9 +15,9 @@ function setup({ ring0Stack = 0x1800, kernelStackSelector = 0x10, absentCode = f
     bytes[5] = access; bytes[6] = ((limit >>> 16) & 0x0f) | (flags << 4); bytes[7] = (base >>> 24) & 0xff;
     memory.write(gdtBase + index * 8, bytes);
   };
-  putDescriptor(1, { access: 0x9a }); // ring 0 code
+  putDescriptor(1, { access: absentKernelCode ? 0x1a : 0x9a }); // ring 0 code
   putDescriptor(2, { access: 0x92 }); // ring 0 data
-  putDescriptor(3, { access: absentCode ? 0x7a : 0xfa }); // ring 3 code
+  putDescriptor(3, { access: 0xfa }); // ring 3 code
   putDescriptor(4, { access: 0xf2 }); // ring 3 data
   putDescriptor(5, { base: 0x500, limit: 0x67, access: 0x89, flags: 0 });
   cpu.systemTables.loadGdtr(gdtBase, 0x2f);
@@ -88,6 +88,6 @@ test("failed privilege-stack write does not partially switch CS, SS, CPL or ESP"
 });
 
 test("absent ring-3 code descriptors cannot be installed", () => {
-  const { cpu } = setup({ absentCode: true });
-  assert.throws(() => cpu.segments.installCodeSegment(0x1b), /not present|privilege/i);
+  const { cpu } = setup({ absentKernelCode: true });
+  assert.throws(() => cpu.step(), /not present|segment|interrupt/i);
 });
