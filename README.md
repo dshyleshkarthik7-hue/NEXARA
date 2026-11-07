@@ -60,6 +60,10 @@ NEXARA does **not** yet provide full x86 32-bit or x86-64 machine compatibility.
 
 Compatibility and performance claims will be made only against reproducible conformance suites and benchmarks.
 
+## Descriptor and interrupt-table groundwork
+
+`packages/x86-core/src/descriptors.js` provides bounded readers for legacy 8-byte GDT/LDT segment descriptors and 64-bit IDT gates. It decodes selector fields, descriptor attributes, segment base/limit, gate target offsets, IST, gate type, presence, and software-interrupt DPL checks. Table reads are checked against both the architectural table limit and guest physical memory bounds. This is a metadata/validation component only: it does not load GDTR/IDTR into CPU state, change CPL, load segment registers, switch stacks, push interrupt frames, or deliver exceptions/interrupts. Those operations remain future work and must not be inferred from descriptor decoding support.
+
 ## Security boundary
 
 The server defaults to loopback binding. Browser origins are allowlisted, and each PTY session has a separate random secret. These controls are useful hardening but are **not** a complete multi-user security boundary. PTY processes still run with the server process user's OS privileges. Before exposing the service to untrusted networks, add user authentication, per-user authorization, process/container or VM isolation, resource quotas, TLS, audit logging, and deployment-specific threat review. Do not run the service as root.
