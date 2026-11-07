@@ -127,6 +127,14 @@ export class X86SegmentState {
     this.cpl = plan.targetCpl;
     this.registers.cs = { selector: plan.selector, cache: plan.cache };
     this.registers.ss = { selector: stackSelector, cache: stackDescriptor };
+    // Intel invalidates data-segment caches that are no longer usable at the
+    // destination CPL after an outward privilege return.
+    for (const name of ["ds", "es", "fs", "gs"]) {
+      const cache = this.registers[name].cache;
+      if (cache && !cache.conforming && cache.dpl < plan.targetCpl) {
+        this.registers[name] = { selector: 0, cache: null };
+      }
+    }
     return this.snapshot();
   }
 
