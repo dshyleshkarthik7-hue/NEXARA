@@ -421,6 +421,14 @@ export class X86Cpu {
       if (second >= 0x80 && second <= 0x8f) {
         const displacement = this.#fetchSigned(4);
         if (this.#condition(second & 15)) this.#branch(displacement, start);
+      } else if ([0xb6, 0xb7, 0xbe, 0xbf].includes(second)) {
+        const decoded = this.#decodeModRM(rex, addressWidth);
+        const sourceWidth = (second === 0xb6 || second === 0xbe) ? 8 : 16;
+        const raw = this.#readOperand(decoded.operand, sourceWidth);
+        const signExtend = second === 0xbe || second === 0xbf;
+        const signBit = 1n << BigInt(sourceWidth - 1);
+        const value = signExtend && (raw & signBit) !== 0n ? raw - (1n << BigInt(sourceWidth)) : raw;
+        this.setRegister(decoded.reg, value, width);
       } else if (second === 0xaf) {
         const decoded = this.#decodeModRM(rex, addressWidth);
         const signExtend = (value, bits) => {
