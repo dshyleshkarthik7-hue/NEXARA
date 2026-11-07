@@ -278,6 +278,28 @@ export class X86Cpu {
         const result = this.#alu("xor", opcode === 0x31 ? operandValue : regValue, opcode === 0x31 ? regValue : operandValue, width);
         if (opcode === 0x31) this.#writeOperand(operand, result, width); else this.setRegister(reg, result, width);
       }
+    } else if (opcode === 0x8d) {
+      const decoded = this.#decodeModRM(rex, addressWidth);
+      if (decoded.operand.kind !== "memory") throw new CpuFault("LEA requires a memory addressing form", start);
+      this.setRegister(decoded.reg, BigInt(decoded.operand.address), width);
+    } else if (opcode === 0xc7) {
+      const decoded = this.#decodeModRM(rex, addressWidth);
+      if (((decoded.reg & 7) !== 0)) throw new CpuFault("Unsupported C7 extension", start);
+      const immediateBytes = width === 16 ? 2 : 4;
+      let immediate = this.#fetchUnsigned(immediateBytes);
+      if (width === 64 && (immediate & 0x80000000n)) immediate |= 0xffffffff00000000n;
+      this.#writeOperand(decoded.operand, immediate, width);
+    } else if (opcode === 0x81 || opcode === 0x83) {
+      const decoded = this.#decodeModRM(rex, addressWidth);
+      const extension = decoded.reg & 7;
+      if (![0, 5, 6, 7].includes(extension)) throw new CpuFault("Unsupported integer group-1 extension", start);
+      const immediateBytes = opcode === 0x83 ? 1 : (width === 16 ? 2 : 4);
+      let immediate = opcode === 0x83 ? this.#fetchSigned(1) : this.#fetchUnsigned(immediateBytes);
+      if (opcode === 0x81 && width === 64 && (immediate & 0x80000000n)) immediate |= 0xffffffff00000000n;
+      const operation = extension === 0 ? "add" : extension === 5 ? "sub" : extension === 6 ? "xor" : "cmp";
+      const left = this.#readOperand(decoded.operand, width);
+      const result = this.#alu(operation, left, immediate, width);
+      if (operation !== "cmp") this.#writeOperand(decoded.operand, result, width);
     } else if ([0x05,0x2d,0x35,0x3d].includes(opcode)) {
       const bytes = width === 64 ? 4 : width / 8;
       let immediate = this.#fetchUnsigned(bytes);
