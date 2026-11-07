@@ -341,9 +341,12 @@ export class X86Cpu {
     } else if (opcode === 0xf6) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       const extension = decoded.reg & 7;
-      if (![2, 3, 4, 5, 6, 7].includes(extension)) throw new CpuFault("Unsupported F6 byte extension", start);
+      if (![0, 2, 3, 4, 5, 6, 7].includes(extension)) throw new CpuFault("Unsupported F6 byte extension", start);
       const operand = this.#readOperand(decoded.operand, 8);
-      if (extension === 2) {
+      if (extension === 0) {
+        const immediate = this.#fetchUnsigned(1);
+        this.#alu("test", operand, immediate, 8);
+      } else if (extension === 2) {
         this.#writeOperand(decoded.operand, (~operand) & 0xffn, 8);
       } else if (extension === 3) {
         const result = this.#alu("sub", 0n, operand, 8);
@@ -371,8 +374,12 @@ export class X86Cpu {
     } else if (opcode === 0xf7) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       const extension = decoded.reg & 7;
-      if (![2, 3, 4, 5, 6, 7].includes(extension)) throw new CpuFault("Unsupported F7 integer extension", start);
+      if (![0, 2, 3, 4, 5, 6, 7].includes(extension)) throw new CpuFault("Unsupported F7 integer extension", start);
       const operand = this.#readOperand(decoded.operand, width) & this.#mask(width);
+      if (extension === 0) {
+        const immediate = this.#fetchUnsigned(width === 16 ? 2 : 4);
+        this.#alu("test", operand, immediate, width);
+      } else {
       const mask = this.#mask(width);
       const signBit = 1n << BigInt(width - 1);
       const signed = value => (value & signBit) !== 0n ? value - (1n << BigInt(width)) : value;
@@ -408,6 +415,7 @@ export class X86Cpu {
         if (quotient < min || quotient > max) throw new CpuFault("Integer division quotient overflow", start);
         this.setRegister(0, quotient, width);
         this.setRegister(2, remainder, width);
+      }
       }
     } else if (opcode === 0xff) {
       const decoded = this.#decodeModRM(rex, addressWidth);
