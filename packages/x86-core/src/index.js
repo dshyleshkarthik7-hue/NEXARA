@@ -251,13 +251,13 @@ export class X86Cpu {
     return { reg, operand: { kind: "memory", address } };
   }
 
-  #readLinear(address, length, { execute = false } = {}) {
+  #readLinear(address, length, { execute = false, user = this.segments.cpl === 3 } = {}) {
     try {
       if (this.addressSpace) return execute
         ? this.addressSpace.fetch(BigInt(address), length)
         : this.addressSpace.read(BigInt(address), length);
       if (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n) {
-        return this.legacyPaging32.read(address, length, { execute, user: this.segments.cpl === 3 });
+        return this.legacyPaging32.read(address, length, { execute, user });
       }
       return this.memory.read(Number(address), length);
     } catch (error) {
@@ -266,11 +266,11 @@ export class X86Cpu {
     }
   }
 
-  #writeLinear(address, data) {
+  #writeLinear(address, data, { user = this.segments.cpl === 3 } = {}) {
     try {
       if (this.addressSpace) this.addressSpace.write(BigInt(address), data);
       else if (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n) {
-        this.legacyPaging32.write(address, data, { user: this.segments.cpl === 3 });
+        this.legacyPaging32.write(address, data, { user });
       } else this.memory.write(Number(address), data);
     } catch (error) {
       if (error instanceof PageFault) this.controlRegisters.set(2, error.address & this.#mask(this.mode));
@@ -423,7 +423,7 @@ export class X86Cpu {
     const frame = new Uint8Array(values.length * 4);
     const view = new DataView(frame.buffer);
     values.forEach((value, index) => view.setUint32(index * 4, Number(BigInt(value) & 0xffffffffn), true));
-    this.#writeLinear(linearAddress, frame);
+    this.#writeLinear(linearAddress, frame, { user: false });
   }
 
   #deliverSoftwareInterrupt(vector, returnIp, start, software = true) {
@@ -462,11 +462,8 @@ export class X86Cpu {
         if (top < frameBytes) throw new Error("TSS privilege stack underflows");
         nextEsp = top - frameBytes;
         if (nextEsp > stackDescriptor.limit || top - 1n > stackDescriptor.limit) throw new Error("TSS privilege stack exceeds SS limit");
-        if (this.addressSpace || (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n)) {
-          throw new Error("Ring stack switch with paging is not yet supported by this interpreter");
-        }
         const linear = stackDescriptor.base + nextEsp;
-        if (linear + frameBytes > BigInt(this.memory.byteLength)) throw new Error("TSS privilege stack exceeds guest memory");
+        if (linear + frameBytes > 4294967296n) throw new Error("TSS privilege stack exceeds 32-bit linear address space");
         frameValues = [BigInt(returnIp), BigInt(oldCs), oldFlags, BigInt(oldEsp), BigInt(oldSs)];
         this.#writeInterruptFrame(Number(linear), frameValues, start);
         this.segments.commitPrivilegeTransition(plan, nextSs, stackDescriptor);
@@ -477,7 +474,7 @@ export class X86Cpu {
         nextEsp = BigInt(oldEsp - 12);
         if (nextEsp + 11n > stackDescriptor.limit) throw new Error("Interrupt frame exceeds SS limit");
         const linear = stackDescriptor.base + nextEsp;
-        if (linear + 12n > BigInt(this.memory.byteLength)) throw new Error("Interrupt frame exceeds guest memory");
+        if (linear + 12n > 4294967296n) throw new Error("Interrupt frame exceeds 32-bit linear address space");
         frameValues = [BigInt(returnIp), BigInt(oldCs), oldFlags];
         this.#writeInterruptFrame(Number(linear), frameValues, start);
         this.segments.installCodeSegment(gate.selector);
