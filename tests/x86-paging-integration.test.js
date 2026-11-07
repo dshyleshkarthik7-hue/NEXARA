@@ -29,4 +29,5 @@ test("32-bit CPU instruction fetch reports a legacy page fault for a non-present
   cpu.writeControlRegister(3, 0n);
   cpu.writeControlRegister(0, 0x80000011n);
   assert.throws(() => cpu.step(), error => error instanceof PageFault && error.instruction);
+  assert.equal(cpu.readControlRegister(2), 0n);
 });
