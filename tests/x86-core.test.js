@@ -344,7 +344,7 @@ test("F7 signed IMUL handles negative products and signed overflow", () => {
   cpu.setRegister(0, 0xfffffffdn, 32);
   cpu.setRegister(3, 7n, 32);
   cpu.step();
-  assert.equal(cpu.getRegister(0,32), 0xffffffe9n);
+  assert.equal(cpu.getRegister(0,32), 0xffffffebn);
   assert.equal(cpu.getRegister(2,32), 0xffffffffn);
   const flags = BigInt(cpu.saveState().flags);
   assert.equal((flags & 1n) !== 0n, false);
