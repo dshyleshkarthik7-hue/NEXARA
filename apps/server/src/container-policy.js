@@ -7,7 +7,7 @@ export function buildSandboxArgs({ image, runtime = "runsc", memory = "512m", cp
   if (typeof image !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,254}$/.test(image)) {
     throw new TypeError("NEXARA_SANDBOX_IMAGE must be a trusted, pre-pulled image reference");
   }
-  if (typeof runtime !== "string" || !/^[a-zA-Z0-9._-]{1,64}$/.test(runtime)) throw new TypeError("Invalid sandbox runtime");
+  if (!["runsc", "kata", "io.containerd.kata.v2", "runc"].includes(runtime)) throw new TypeError("Sandbox runtime must be an explicitly supported runtime");
   if (typeof memory !== "string" || !/^(?:[1-9]\d{0,3})(?:m|g)$/.test(memory)) throw new TypeError("Invalid sandbox memory limit");
   if (typeof cpus !== "string" || !/^(?:[1-9]\d*(?:\.\d{1,2})?|0\.\d{1,2})$/.test(cpus) || Number(cpus) <= 0 || Number(cpus) > 4) throw new TypeError("Invalid sandbox CPU limit");
   if (!Number.isSafeInteger(pids) || pids < 8 || pids > 512) throw new TypeError("Invalid sandbox PID limit");
@@ -24,8 +24,8 @@ export function buildSandboxArgs({ image, runtime = "runsc", memory = "512m", cp
     "--user", "65534:65534",
     "--env", "HOME=/tmp",
     "--env", "TERM=xterm-256color",
-    "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
-    "--tmpfs", "/workspace:rw,noexec,nosuid,nodev,size=128m",
+    "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m,uid=65534,gid=65534",
+    "--tmpfs", "/workspace:rw,noexec,nosuid,nodev,size=128m,uid=65534,gid=65534",
     "--workdir", "/workspace",
     "--entrypoint", "/bin/sh",
     image,
