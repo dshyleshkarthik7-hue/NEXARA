@@ -73,3 +73,51 @@ test("address space enforces read-only and execute-only page permissions", () =>
   assert.deepEqual([...mmu.fetch(0x5000n, 1)], [0]);
   assert.throws(() => mmu.write(0x5000n, Uint8Array.of(1)), PageFault);
 });
+
+
+test("four-level page-table walker translates a 4 KiB guest page", () => {
+  const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
+  const mmu = new GuestAddressSpace(memory);
+  const put64 = (address, value) => {
+    const bytes = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) bytes[i] = Number((value >> BigInt(i * 8)) & 0xffn);
+    memory.write(address, bytes);
+  };
+  // PML4 -> PDPT -> PD -> PT. All levels are present, writable and user-accessible.
+  put64(0, 0x1000n | 7n);
+  put64(0x1000, 0x2000n | 7n);
+  put64(0x2000, 0x3000n | 7n);
+  put64(0x3000 + 4 * 8, 0x4000n | 7n);
+  memory.write(0x400a, Uint8Array.of(0x4e, 0x58));
+  mmu.setPageTableRoot(0n);
+  assert.equal(mmu.translate(0x400an), 0x400a);
+  assert.deepEqual([...mmu.read(0x400an, 2)], [0x4e, 0x58]);
+});
+
+test("four-level page-table walker enforces user write and NX permissions", () => {
+  const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
+  const mmu = new GuestAddressSpace(memory);
+  const put64 = (address, value) => {
+    const bytes = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) bytes[i] = Number((value >> BigInt(i * 8)) & 0xffn);
+    memory.write(address, bytes);
+  };
+  put64(0, 0x1000n | 7n);
+  put64(0x1000, 0x2000n | 7n);
+  put64(0x2000, 0x3000n | 7n);
+  put64(0x3000 + 4 * 8, 0x4000n | 5n | (1n << 63n)); // present, user, NX, read-only
+  mmu.setPageTableRoot(0n);
+  assert.equal(mmu.translate(0x4000n, { user: true }), 0x4000);
+  assert.throws(() => mmu.translate(0x4000n, { write: true }), error => error instanceof PageFault && error.present && error.write);
+  assert.throws(() => mmu.translate(0x4000n, { execute: true }), error => error instanceof PageFault && error.instruction);
+  assert.throws(() => mmu.translate(0x4000n, { user: false }), error => error instanceof PageFault && error.present);
+});
+
+test("page-table walker rejects invalid CR3 roots and absent entries", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const mmu = new GuestAddressSpace(memory);
+  assert.throws(() => mmu.setPageTableRoot(1n), RangeError);
+  assert.throws(() => mmu.setPageTableRoot(0x2000n), RangeError);
+  mmu.setPageTableRoot(0n);
+  assert.throws(() => mmu.translate(0n), PageFault);
+});
