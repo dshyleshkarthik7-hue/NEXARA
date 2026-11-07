@@ -411,7 +411,6 @@ export class X86Cpu {
         const selector = this.segments.registers[names[segment]]?.selector ?? 0;
         this.#writeOperand(decoded.operand, BigInt(selector), 16);
       } else {
-        if (decoded.operand.kind === "register") throw new CpuFault("MOV Sreg requires a register/memory source operand", start);
         if ((this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Real-mode segment loads are not implemented", start);
         if (this.segments.cpl !== 0 && segment === 2) throw new CpuFault("Loading SS requires CPL 0 in this implementation", start);
         const selector = Number(this.#readOperand(decoded.operand, 16));
@@ -596,7 +595,7 @@ export class X86Cpu {
           throw new CpuFault("LGDT/LIDT require CPL 0 in protected mode", start);
         }
         const length = this.mode === 64 ? 10 : 6;
-        const raw = this.memory.read(decoded.operand.address, length);
+        const raw = this.addressSpace ? this.addressSpace.read(BigInt(decoded.operand.address), length) : this.memory.read(decoded.operand.address, length);
         const limit = raw[0] | (raw[1] << 8);
         let base = 0n;
         const baseBytes = this.mode === 64 ? 8 : 4;
@@ -619,12 +618,30 @@ export class X86Cpu {
         if ((this.controlRegisters.get(0) & 1n) === 0n || this.segments.cpl !== 0) {
           throw new CpuFault("LLDT/LTR require protected mode at CPL 0", start);
         }
-        const selector = Number(this.memory.read(decoded.operand.address, 2)[0] | (this.memory.read(decoded.operand.address, 2)[1] << 8));
+        const selector = Number(this.#readOperand(decoded.operand, 16));
         if (selector === 0) {
           if (extension === 2) this.systemTables.clearLdtr();
           else throw new CpuFault("LTR selector cannot be null", start);
         } else {
-          throw new CpuFault("LLDT/LTR system-descriptor execution is not yet supported", start);
+          if (this.mode === 64) throw new CpuFault("64-bit system-descriptor execution is not yet supported", start);
+          try {
+            if ((selector & 4) !== 0) throw new Error("LLDT/LTR selector must reference the GDT");
+            const descriptor = this.gdt.readSegment(selector, { cpl: this.segments.cpl });
+            if (!descriptor || !descriptor.system || !descriptor.present) throw new Error("System descriptor is invalid or not present");
+            const raw = descriptor.raw;
+            const access = raw[5];
+            const type = access & 0x0f;
+            const base = descriptor.base;
+            const limit = descriptor.limit;
+            if (extension === 2) {
+              if (type !== 2) throw new Error("LLDT requires an LDT system descriptor");
+              this.systemTables.loadLdtr({ selector, base, limit, present: true, usable: true });
+            } else {
+              if (type !== 9) throw new Error("LTR requires an available 32-bit TSS descriptor");
+              this.systemTables.loadTaskRegister({ selector, base, limit, present: true, busy: true, usable: true });
+              this.memory.write(Number(this.systemTables.gdtr.base) + ((selector >>> 3) * 8) + 5, Uint8Array.of((access & 0xf0) | 0x0b));
+            }
+          } catch (error) { throw new CpuFault(error.message, start); }
         }
       } else if (second >= 0x80 && second <= 0x8f) {
         const displacement = this.#fetchSigned(4);
