@@ -618,3 +618,37 @@ test("CPU owns protected-mode segment state and restores cached selectors", () =
   assert.equal(restored.segments.snapshot().ss.selector, 0x10);
   assert.equal(restored.segments.snapshot().ds.writable, true);
 });
+
+
+test("protected-mode MOV Sreg loads a validated data selector", () => {
+  const cpu = cpuFor([0xb8,0x10,0,0,0,0x8e,0xd8,0xf4], 32);
+  cpu.memory.write(16, Uint8Array.from([0xff,0xff,0,0,0,0x92,0xcf,0]));
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  cpu.run({ maxInstructions: 4 });
+  assert.equal(cpu.segments.snapshot().ds.selector, 0x10);
+  assert.equal(cpu.segments.snapshot().ds.writable, true);
+});
+
+test("LGDT and LIDT load bounded 32-bit pseudo-descriptors", () => {
+  const cpu = cpuFor([0x0f,0x01,0x15,0x80,0,0,0,0x0f,0x01,0x1d,0x88,0,0,0,0xf4], 32);
+  cpu.memory.write(0x80, Uint8Array.from([0x27,0,0x00,0x01,0,0]));
+  cpu.memory.write(0x88, Uint8Array.from([0x1f,0,0x00,0x02,0,0]));
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  cpu.run({ maxInstructions: 3 });
+  assert.equal(cpu.systemTables.gdtr.base, 0x100n);
+  assert.equal(cpu.systemTables.gdtr.limit, 0x27);
+  assert.equal(cpu.systemTables.idtr.base, 0x200n);
+  assert.equal(cpu.systemTables.idtr.limit, 0x1f);
+});
+
+test("LLDT loads an LDT descriptor and LTR marks an available 32-bit TSS busy", () => {
+  const cpu = cpuFor([0xb8,0x10,0,0,0,0x0f,0x00,0xd0,0xb8,0x18,0,0,0,0x0f,0x00,0xd8,0xf4], 32);
+  cpu.memory.write(0x108, Uint8Array.from([0x0f,0,0x00,0x03,0,0x82,0,0]));
+  cpu.memory.write(0x110, Uint8Array.from([0x67,0,0x00,0x04,0,0x89,0,0]));
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  cpu.run({ maxInstructions: 5 });
+  assert.equal(cpu.systemTables.ldtr.selector, 0x10);
+  assert.equal(cpu.systemTables.task.selector, 0x18);
+  assert.equal(cpu.systemTables.task.busy, true);
+  assert.equal(cpu.memory.read(0x115, 1)[0] & 0x0f, 0x0b);
+});
