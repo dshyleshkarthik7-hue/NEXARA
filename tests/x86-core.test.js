@@ -72,3 +72,39 @@ test("x86-64 accumulator immediate uses sign-extended imm32", () => {
   cpu.run();
   assert.equal(cpu.getRegister(0, 64), 0xffffffffffffffffn);
 });
+
+test("CALL and RET transfer control through an absolute return address", () => {
+  const cpu = cpuFor([
+    0xe8,0x02,0x00,0x00,0x00, // call +2 -> address 7
+    0xf4,                   // halt after return
+    0x90,                   // padding
+    0xb8,0x2a,0,0,0,        // mov eax,42
+    0xc3                    // ret
+  ], 32);
+  cpu.setRegister(4, 512n, 32);
+  const result = cpu.run();
+  assert.equal(result.state, "halted");
+  assert.equal(cpu.getRegister(0, 32), 42n);
+  assert.equal(cpu.getRegister(4, 32), 512n);
+  assert.equal(cpu.ip, 6);
+});
+
+test("conditional parity branches use the low-byte parity flag", () => {
+  const cpu = cpuFor([
+    0xb8,0x03,0,0,0, // mov eax,3 (two set bits, even parity)
+    0x3d,0x03,0,0,0, // cmp eax,3
+    0x7a,0x01,       // jp +1
+    0xf4,            // skipped
+    0xf4             // halt
+  ], 32);
+  cpu.run();
+  assert.equal(cpu.halted, true);
+  assert.equal(cpu.ip, 14);
+});
+
+test("failed push leaves stack pointer unchanged", () => {
+  const cpu = cpuFor([0x50], 32);
+  cpu.setRegister(4, 2n, 32);
+  assert.throws(() => cpu.step(), RangeError);
+  assert.equal(cpu.getRegister(4, 32), 2n);
+});
