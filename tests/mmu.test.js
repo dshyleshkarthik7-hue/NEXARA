@@ -219,3 +219,37 @@ test("legacy 32-bit paging supports CR4.PSE 4 MiB pages and rejects reserved bit
   paging.flush();
   assert.throws(() => paging.translate(0x2345), error => error instanceof PageFault && error.reserved);
 });
+
+
+test("legacy paging snapshots preserve CR3 and controls but discard cached translations", async () => {
+  const { X86LegacyPaging32 } = await import("../packages/runtime/src/mmu.js");
+  const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
+  const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
+  put32(0, 0x1007);
+  put32(0x1000, 0x2007);
+  const original = new X86LegacyPaging32(memory, { pse: true, writeProtect: true });
+  original.loadCr3(0);
+  assert.equal(original.translate(0), 0x2000);
+  const state = original.snapshot();
+  const restored = new X86LegacyPaging32(memory);
+  restored.restore(state);
+  assert.equal(restored.cr3, 0n);
+  assert.equal(restored.pse, true);
+  assert.equal(restored.writeProtect, true);
+  assert.equal(restored.translate(0), 0x2000);
+  assert.throws(() => restored.restore({ ...state, cr3: "4096" }), RangeError);
+  assert.throws(() => restored.restore({ ...state, writeProtect: "false" }), TypeError);
+});
+
+test("legacy 4 MiB page permits the PAT bit but rejects reserved alignment bits", async () => {
+  const { X86LegacyPaging32 } = await import("../packages/runtime/src/mmu.js");
+  const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
+  const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
+  put32(0, 0x1083); // PS=1, PAT(bit 12)=1, physical base remains 0.
+  const paging = new X86LegacyPaging32(memory, { pse: true });
+  paging.loadCr3(0);
+  assert.equal(paging.translate(0x2345), 0x2345);
+  put32(0, 0x2083); // bit 13 is reserved in the supported non-PSE-36 model.
+  paging.flush();
+  assert.throws(() => paging.translate(0x2345), error => error instanceof PageFault && error.reserved);
+});
