@@ -43,6 +43,7 @@ export class X86Cpu {
     this.flags = 2n;
     this.halted = false;
     this.instructionsExecuted = 0;
+    this.pendingInterrupts = [];
     this.controlRegisters = new Map([[0, 0x60000010n], [2, 0n], [3, 0n], [4, 0n]]);
     this.efer = 0n;
     this.systemTables = new X86SystemTableState(memory, { longMode: mode === 64 });
@@ -58,6 +59,12 @@ export class X86Cpu {
     this.segments.ldt = ldtr.usable && ldtr.present
       ? new X86DescriptorTable(this.memory, { base: ldtr.base, limit: ldtr.limit, kind: "ldt", longMode: this.mode === 64 })
       : null;
+  }
+
+  requestInterrupt(vector) {
+    if (!Number.isInteger(vector) || vector < 0 || vector > 255) throw new RangeError("Interrupt vector must be between 0 and 255");
+    if (this.pendingInterrupts.length >= 256) throw new RangeError("Pending interrupt queue is full");
+    if (!this.pendingInterrupts.includes(vector)) this.pendingInterrupts.push(vector);
   }
 
   readControlRegister(index) {
@@ -369,11 +376,11 @@ export class X86Cpu {
     return value;
   }
 
-  #deliverSoftwareInterrupt(vector, returnIp, start) {
+  #deliverSoftwareInterrupt(vector, returnIp, start, software = true) {
     if (this.mode !== 32) throw new CpuFault("Software interrupt delivery currently supports 32-bit mode only", start);
     let gate;
     try {
-      gate = this.idt.readGate(vector, { cpl: this.segments.cpl, software: true });
+      gate = this.idt.readGate(vector, { cpl: this.segments.cpl, software });
       if (gate.taskGate) throw new Error("Task gates are not supported");
       const target = this.gdt.readSegment(gate.selector, { cpl: this.segments.cpl });
       if (!target || !target.executable || !target.present) throw new Error("Interrupt target is not a present code segment");
@@ -411,6 +418,10 @@ export class X86Cpu {
   step() {
     if (this.halted) return { state: "halted", ip: this.ip };
     const start = this.ip;
+    if (this.mode === 32 && (this.flags & (1n << 9n)) !== 0n && this.pendingInterrupts.length) {
+      const vector = this.pendingInterrupts.shift();
+      this.#deliverSoftwareInterrupt(vector, this.ip, start, false);
+    }
     let operand16 = false;
     let address32 = false;
     let rex = 0;
@@ -857,6 +868,7 @@ export class X86Cpu {
       registers: this.registers.map(value => value.toString()),
       flags: this.flags.toString(),
       halted: this.halted,
+      pendingInterrupts: [...this.pendingInterrupts],
       instructionsExecuted: this.instructionsExecuted,
       controlRegisters: Object.fromEntries([...this.controlRegisters].map(([key,value]) => [String(key), value.toString()])),
       efer: this.efer.toString(),
@@ -876,6 +888,8 @@ export class X86Cpu {
       || !state.registers.every(value => typeof value === "string" && /^\d+$/.test(value))
       || typeof state.flags !== "string" || !/^\d+$/.test(state.flags)
       || typeof state.halted !== "boolean"
+      || !Array.isArray(state.pendingInterrupts) || state.pendingInterrupts.length > 256
+      || !state.pendingInterrupts.every(vector => Number.isInteger(vector) && vector >= 0 && vector <= 255)
       || !Number.isSafeInteger(state.instructionsExecuted) || state.instructionsExecuted < 0
       || !state.controlRegisters || !["0","2","3","4"].every(key => typeof state.controlRegisters[key] === "string" && /^\d+$/.test(state.controlRegisters[key]))
       || typeof state.efer !== "string" || !/^\d+$/.test(state.efer)
@@ -906,6 +920,7 @@ export class X86Cpu {
     this.registers = registers;
     this.flags = flags;
     this.halted = state.halted;
+    this.pendingInterrupts = [...state.pendingInterrupts];
     this.instructionsExecuted = state.instructionsExecuted;
     this.controlRegisters = new Map(["0","2","3","4"].map(key => [Number(key), BigInt(state.controlRegisters[key])]));
     this.efer = BigInt(state.efer);
