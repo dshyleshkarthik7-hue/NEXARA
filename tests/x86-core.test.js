@@ -10,7 +10,7 @@ function cpuFor(bytes, mode = 64) {
 }
 
 test("executes x86-64 mov immediate, add immediate, and halt", () => {
-  const cpu = cpuFor([0x48,0xb8,5,0,0,0,0,0,0,0, 0x48,0x05,7,0,0,0,0,0,0,0, 0xf4]);
+  const cpu = cpuFor([0x48,0xb8,5,0,0,0,0,0,0,0, 0x48,0x05,7,0,0,0, 0xf4]);
   const result = cpu.run();
   assert.equal(result.state, "halted");
   assert.equal(cpu.getRegister(0, 64), 12n);
@@ -40,4 +40,10 @@ test("instruction budget prevents unbounded guest loops", () => {
   const cpu = cpuFor([0xeb,0xfe], 32);
   assert.equal(cpu.run({ maxInstructions: 5 }).state, "limit");
   assert.equal(cpu.instructionsExecuted, 5);
+});
+
+test("x86-64 accumulator immediate uses sign-extended imm32", () => {
+  const cpu = cpuFor([0x48,0xb8,0,0,0,0,0,0,0,0, 0x48,0x05,0xff,0xff,0xff,0xff, 0xf4]);
+  cpu.run();
+  assert.equal(cpu.getRegister(0, 64), 0xffffffffffffffffn);
 });
