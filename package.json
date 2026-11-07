@@ -14,7 +14,7 @@
     "build": "npm --workspace @nexara/web run build",
     "start": "npm --workspace @nexara/server start",
     "test": "node --test",
-    "package": "node scripts/package.mjs"
+    "package": "npm run build && node scripts/package.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
