@@ -27,6 +27,7 @@ export class PageFault extends Error {
 export class GuestAddressSpace {
   #mappings = new Map();
   #tlb = new Map();
+  #pageTableRoot = null;
 
   constructor(memory, { physicalAddressBits = 48, virtualAddressBits = 48 } = {}) {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
@@ -98,8 +99,67 @@ export class GuestAddressSpace {
     });
   }
 
+  setPageTableRoot(cr3) {
+    const root = BigInt(cr3);
+    if (root < 0n || (root & PAGE_MASK) !== 0n || root + PAGE_MASK >= BigInt(this.memory.byteLength)) {
+      throw new RangeError("CR3 must reference an aligned page-table frame in guest physical memory");
+    }
+    this.#pageTableRoot = root;
+    this.#tlb.clear();
+    return root;
+  }
+
+  get pageTableRoot() { return this.#pageTableRoot; }
+
+  #readEntry(address) {
+    if (address < 0n || address + 8n > BigInt(this.memory.byteLength)) {
+      throw new PageFault(0n);
+    }
+    const bytes = this.memory.read(Number(address), 8);
+    let value = 0n;
+    for (let i = 0; i < 8; i++) value |= BigInt(bytes[i]) << BigInt(i * 8);
+    return value;
+  }
+
+  #walkPageTables(virtual, { read, write, execute, user }) {
+    const indexes = [39n, 30n, 21n, 12n].map(shift => Number((virtual >> shift) & 0x1ffn));
+    let table = this.#pageTableRoot;
+    let effectiveWrite = true;
+    let effectiveUser = true;
+    let effectiveExecute = true;
+    for (let level = 0; level < 4; level++) {
+      const entryAddress = table + BigInt(indexes[level] * 8);
+      const entry = this.#readEntry(entryAddress);
+      const present = (entry & 1n) !== 0n;
+      if (!present) throw new PageFault(virtual, { write, user, instruction: execute });
+      effectiveWrite &&= (entry & 2n) !== 0n;
+      effectiveUser &&= (entry & 4n) !== 0n;
+      effectiveExecute &&= (entry & (1n << 63n)) === 0n;
+      if (level < 3) {
+        if ((entry & (1n << 7n)) !== 0n) {
+          throw new PageFault(virtual, { present: true, write, user, instruction: execute });
+        }
+        table = entry & 0x0000fffffffff000n;
+        if (table + PAGE_MASK >= BigInt(this.memory.byteLength)) {
+          throw new PageFault(virtual, { present: true, write, user, instruction: execute });
+        }
+      } else {
+        const allowed = (!write || effectiveWrite) && (!user || effectiveUser)
+          && (!execute || effectiveExecute);
+        if (!allowed) throw new PageFault(virtual, { present: true, write, user, instruction: execute });
+        const physical = (entry & 0x0000fffffffff000n) | (virtual & PAGE_MASK);
+        if (physical >= BigInt(this.memory.byteLength)) {
+          throw new PageFault(virtual, { present: true, write, user, instruction: execute });
+        }
+        return Number(physical);
+      }
+    }
+    throw new PageFault(virtual);
+  }
+
   translate(virtualAddress, { read = true, write = false, execute = false, user = false } = {}) {
     const virtual = this.#normalize(virtualAddress);
+    if (this.#pageTableRoot !== null) return this.#walkPageTables(virtual, { read, write, execute, user });
     const key = this.#key(virtual);
     let entry = this.#tlb.get(key);
     if (!entry) {
