@@ -2,6 +2,5 @@
   "name": "@nexara/x86-core",
   "private": true,
   "type": "module",
-  "exports": "./src/index.js",
-  "dependencies": { "@nexara/runtime": "workspace:*" }
+  "exports": "./src/index.js"
 }
