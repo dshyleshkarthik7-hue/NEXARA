@@ -5,3 +5,7 @@
 #workspace-files .file-item.active{border-left:2px solid #a5f06c}
 #new-file{margin-bottom:6px}
 #editor-save-status{margin-right:auto;min-width:110px}
+
+.tab-tools{display:flex;align-items:center;gap:10px}
+.tab-tools button{background:transparent;border:1px solid #303746;border-radius:5px;color:#aab0bd;padding:4px 9px;font-size:10px;cursor:pointer}
+.tab-tools button:hover{border-color:#a5f06c;color:#e8eaf0}
