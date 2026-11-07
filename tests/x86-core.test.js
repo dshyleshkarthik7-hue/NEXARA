@@ -281,7 +281,7 @@ test("supports 64-bit immediate shifts and treats a zero count as a no-op", () =
 
 test("supports signed two-operand IMUL and negative products", () => {
   const cpu = cpuFor([0x0f,0xaf,0xc8], 32);
-  cpu.setRegister(0,0xfffffff dn, 32);
+  cpu.setRegister(0, 0xfffffffdn, 32);
   cpu.setRegister(1, 7n, 32);
   cpu.step();
   assert.equal(cpu.getRegister(1,32), 0xffffffebn);
