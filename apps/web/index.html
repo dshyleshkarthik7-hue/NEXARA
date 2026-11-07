@@ -26,7 +26,7 @@
           <div class="sidebar-footer"><span class="status-dot"></span> Local workspace</div>
         </aside>
         <section class="main-area">
-          <div class="tabbar"><div class="tab active"><span class="file-dot"></span> <span id="active-filename">untitled.txt</span> <span class="tab-close">×</span></div><div class="tab-tools"><input id="file-import" type="file" accept="text/*,.js,.json,.md,.html,.css,.py,.sh" hidden /><button id="import-file" type="button">Import</button><button id="export-file" type="button">Export</button><span class="tab-hint">NEXARA EDITOR</span></div></div>
+          <div class="tabbar"><div class="tab active"><span class="file-dot"></span> <span id="active-filename">untitled.txt</span> <span class="tab-close">×</span></div><div class="tab-tools"><input id="file-import" type="file" accept="text/*,.js,.json,.md,.html,.css,.py,.sh" hidden /><button id="import-file" type="button">Import</button><button id="export-file" type="button">Export</button><select id="x86-mode" aria-label="x86 mode"><option value="32">x86-32</option><option value="64">x86-64</option></select><button id="run-x86" type="button">Run bytes</button><span class="tab-hint">NEXARA EDITOR</span></div></div>
           <div class="editor-wrap">
             <div class="line-numbers" id="line-numbers">1</div>
             <textarea id="editor" disabled spellcheck="false" aria-label="Text editor" placeholder="Start writing…"></textarea>
