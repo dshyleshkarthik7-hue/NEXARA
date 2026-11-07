@@ -36,7 +36,7 @@ test("returns null for the null selector and rejects out-of-limit descriptors", 
 });
 
 test("decodes a 64-bit interrupt gate including high offset and IST", () => {
-  const memory = new GuestMemory({ initialPages: 1, maximumPages: 1 });
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
   const idt = new X86DescriptorTable(memory, { base: 0x200, limit: 0x0fff, kind: "idt", longMode: true });
   const entry = new Uint8Array(16);
   entry[0] = 0x78; entry[1] = 0x56;
@@ -55,14 +55,14 @@ test("decodes a 64-bit interrupt gate including high offset and IST", () => {
 
 test("IDT software interrupt gate checks DPL and presence", () => {
   const memory = new GuestMemory({ initialPages: 1, maximumPages: 1 });
-  const idt = new X86DescriptorTable(memory, { base: 0x100, limit: 0xfff, kind: "idt" });
+  const idt = new X86DescriptorTable(memory, { base: 0, limit: 0xfff, kind: "idt" });
   const gate = new Uint8Array(16);
   gate[2] = 8; gate[5] = 0xee; // present DPL3 interrupt gate
-  memory.write(0x100 + 3 * 16, gate);
+  memory.write(3 * 16, gate);
   assert.equal(idt.readGate(3, { cpl: 3, software: true }).dpl, 3);
   assert.throws(() => idt.readGate(3, { cpl: 0, software: true }), /privilege/);
   gate[5] = 0x0e;
-  memory.write(0x100 + 4 * 16, gate);
+  memory.write(4 * 16, gate);
   assert.throws(() => idt.readGate(4), /not-present/);
 });
 
