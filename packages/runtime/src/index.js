@@ -92,4 +92,4 @@ export class GuestMemory {
   }
 }
 
-export { Pic8259, Pit8253 } from "./devices.js";
+export { Pic8259, Pit8253, PcAtInterruptFabric } from "./devices.js";
