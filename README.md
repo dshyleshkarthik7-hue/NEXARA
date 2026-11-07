@@ -62,7 +62,7 @@ Compatibility and performance claims will be made only against reproducible conf
 
 ## Descriptor and interrupt-table groundwork
 
-`packages/x86-core/src/descriptors.js` provides bounded readers for legacy 8-byte GDT/LDT segment descriptors and 64-bit IDT gates. It decodes selector fields, descriptor attributes, segment base/limit, gate target offsets, IST, gate type, presence, and software-interrupt DPL checks. Table reads are checked against both the architectural table limit and guest physical memory bounds. The CPU now owns GDTR/IDTR state and executes a limited subset of LGDT/LIDT, MOV Sreg, LLDT and LTR instructions. Descriptor decoding still does not imply complete privilege transitions, stack switching, interrupt frames or exception delivery.
+`packages/x86-core/src/descriptors.js` provides bounded readers for legacy 8-byte GDT/LDT segment descriptors and 64-bit IDT gates. It decodes selector fields, descriptor attributes, segment base/limit, gate target offsets, IST, gate type, presence, and software-interrupt DPL checks. Table reads are checked against both the architectural table limit and guest physical memory bounds. The CPU now owns GDTR/IDTR/LDTR/task-register state and executes a limited subset of LGDT/LIDT, MOV Sreg, LLDT and LTR instructions. LLDT activates an LDT descriptor view for TI=1 segment selectors, and CPU save-state restoration reconstructs that view from the saved LDTR. LTR accepts available 32-bit TSS descriptors and marks the descriptor busy. Descriptor decoding still does not imply complete privilege transitions, stack switching or exception delivery.
 
 ## Security boundary
 
