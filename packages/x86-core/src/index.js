@@ -15,7 +15,8 @@ export class CpuFault extends Error {
 /**
  * Experimental x86 interpreter, not a complete x86 implementation.
  * Supports a limited integer instruction subset in 32-bit and 64-bit modes.
- * No privilege model, segmentation, paging, interrupts, FPU/SIMD, or devices.
+ * Includes an experimental partial paging model and limited control-register/MSR instructions.
+ * No CPL/ring privilege model, segmentation, interrupt delivery, FPU/SIMD, or devices.
  */
 export class X86Cpu {
   constructor({ memory, mode = 64, instructionPointer = 0, addressSpace = null } = {}) {
