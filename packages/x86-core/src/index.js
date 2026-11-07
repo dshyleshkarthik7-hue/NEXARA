@@ -4,6 +4,7 @@ import { X86SystemTableState } from "./system-tables.js";
 export { X86Tss32 } from "./task-state.js";
 import { X86DescriptorTable } from "./descriptors.js";
 import { X86SegmentState } from "./segments.js";
+import { X86Tss32 } from "./task-state.js";
 
 const REG_NAMES = ["rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15"];
 const CF = 1n, PF = 1n << 2n, ZF = 1n << 6n, SF = 1n << 7n, OF = 1n << 11n;
@@ -362,16 +363,28 @@ export class X86Cpu {
     this.ip = target;
   }
 
-  #checkIoPermission(start) {
+  #checkIoPermission(start, port, width) {
     const iopl = Number((this.flags >> 12n) & 3n);
-    if (this.segments.cpl > iopl) throw new CpuFault("I/O privilege check failed (#GP); TSS I/O bitmap is not implemented", start);
+    if (this.segments.cpl > iopl) {
+      const task = this.systemTables.task;
+      if (!task.usable || !task.present || task.limit < 0x67) {
+        throw new CpuFault("I/O privilege check failed (#GP); no usable 32-bit TSS is loaded", start);
+      }
+      try {
+        const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit });
+        if (!tss.allowsIo(port, width)) throw new Error("TSS I/O bitmap denies this port range");
+      } catch (error) {
+        throw new CpuFault("I/O privilege check failed (#GP): " + error.message, start);
+      }
+    }
     if (!this.ioBus) throw new CpuFault("I/O instruction executed without an attached guest I/O bus", start);
   }
 
   #readIo(port, width, start) {
-    this.#checkIoPermission(start);
     if (![8, 16, 32].includes(width)) throw new CpuFault("Unsupported I/O operand width", start);
     if (!Number.isInteger(port) || port < 0 || port > 0xffff || port + width / 8 > 0x10000) throw new CpuFault("I/O port range overflow", start);
+    this.#checkIoPermission(start, port, width);
+    if (!this.ioBus) throw new CpuFault("I/O instruction executed without an attached guest I/O bus", start);
     try {
       const value = this.ioBus.read(port, width);
       const result = BigInt(value);
@@ -384,6 +397,8 @@ export class X86Cpu {
     this.#checkIoPermission(start);
     if (![8, 16, 32].includes(width)) throw new CpuFault("Unsupported I/O operand width", start);
     if (!Number.isInteger(port) || port < 0 || port > 0xffff || port + width / 8 > 0x10000) throw new CpuFault("I/O port range overflow", start);
+    this.#checkIoPermission(start, port, width);
+    if (!this.ioBus) throw new CpuFault("I/O instruction executed without an attached guest I/O bus", start);
     try { this.ioBus.write(port, BigInt(value) & this.#mask(width), width); }
     catch (error) { throw new CpuFault("Guest I/O write failed: " + error.message, start); }
   }
