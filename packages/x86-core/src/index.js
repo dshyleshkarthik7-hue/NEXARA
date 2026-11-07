@@ -43,6 +43,7 @@ export class X86Cpu {
     this.efer = 0n;
     this.systemTables = new X86SystemTableState(memory, { longMode: mode === 64 });
     this.gdt = new X86DescriptorTable(memory, { base: 0n, limit: Math.min(0xffff, memory.byteLength - 1), kind: "gdt", longMode: mode === 64 });
+    this.idt = new X86DescriptorTable(memory, { base: 0n, limit: Math.min(0xffff, memory.byteLength - 1), kind: "idt", longMode: mode === 64 });
     this.segments = new X86SegmentState({ gdt: this.gdt, cpl: 0, longMode: mode === 64 });
   }
 
@@ -401,6 +402,24 @@ export class X86Cpu {
         }
         this.#writeOperand(decoded.operand, result, width);
       }
+    } else if (opcode === 0x8e || opcode === 0x8c) {
+      const decoded = this.#decodeModRM(rex, addressWidth);
+      const segment = decoded.reg & 7;
+      const names = ["es", null, "ss", "ds", "fs", "gs"];
+      if (segment === 1 || segment === 6 || segment === 7) throw new CpuFault("Invalid segment-register encoding", start);
+      if (opcode === 0x8c) {
+        const selector = this.segments.registers[names[segment]]?.selector ?? 0;
+        this.#writeOperand(decoded.operand, BigInt(selector), 16);
+      } else {
+        if (decoded.operand.kind === "register") throw new CpuFault("MOV Sreg requires a register/memory source operand", start);
+        if ((this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Real-mode segment loads are not implemented", start);
+        if (this.segments.cpl !== 0 && segment === 2) throw new CpuFault("Loading SS requires CPL 0 in this implementation", start);
+        const selector = Number(this.#readOperand(decoded.operand, 16));
+        try {
+          if (segment === 2) this.segments.loadStack(selector);
+          else this.segments.loadData(names[segment], selector);
+        } catch (error) { throw new CpuFault(error.message, start); }
+      }
     } else if (opcode === 0x63 && this.mode === 64 && (rex & 8)) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       const raw = this.#readOperand(decoded.operand, 32);
@@ -567,7 +586,47 @@ export class X86Cpu {
       if (this.#condition(opcode & 15)) this.#branch(displacement, start);
     } else if (opcode === 0x0f) {
       const second = this.#fetch8();
-      if (second >= 0x80 && second <= 0x8f) {
+      if (second === 0x01) {
+        const decoded = this.#decodeModRM(rex, addressWidth);
+        const extension = decoded.reg & 7;
+        if (decoded.operand.kind !== "memory" || (decoded.reg & 8) !== 0 || (extension !== 2 && extension !== 3)) {
+          throw new CpuFault("LGDT/LIDT require a memory operand", start);
+        }
+        if ((this.controlRegisters.get(0) & 1n) !== 0n && this.segments.cpl !== 0) {
+          throw new CpuFault("LGDT/LIDT require CPL 0 in protected mode", start);
+        }
+        const length = this.mode === 64 ? 10 : 6;
+        const raw = this.memory.read(decoded.operand.address, length);
+        const limit = raw[0] | (raw[1] << 8);
+        let base = 0n;
+        const baseBytes = this.mode === 64 ? 8 : 4;
+        for (let i = 0; i < baseBytes; i++) base |= BigInt(raw[2 + i]) << BigInt(i * 8);
+        try {
+          if (extension === 2) {
+            this.systemTables.loadGdtr(base, limit);
+            this.gdt.setRegister(base, limit);
+          } else {
+            this.systemTables.loadIdtr(base, limit);
+            this.idt.setRegister(base, limit);
+          }
+        } catch (error) { throw new CpuFault(error.message, start); }
+      } else if (second === 0x00) {
+        const decoded = this.#decodeModRM(rex, addressWidth);
+        const extension = decoded.reg & 7;
+        if (decoded.operand.kind !== "memory" || (decoded.reg & 8) !== 0 || (extension !== 2 && extension !== 3)) {
+          throw new CpuFault("LLDT/LTR require a memory selector operand", start);
+        }
+        if ((this.controlRegisters.get(0) & 1n) === 0n || this.segments.cpl !== 0) {
+          throw new CpuFault("LLDT/LTR require protected mode at CPL 0", start);
+        }
+        const selector = Number(this.memory.read(decoded.operand.address, 2)[0] | (this.memory.read(decoded.operand.address, 2)[1] << 8));
+        if (selector === 0) {
+          if (extension === 2) this.systemTables.clearLdtr();
+          else throw new CpuFault("LTR selector cannot be null", start);
+        } else {
+          throw new CpuFault("LLDT/LTR system-descriptor execution is not yet supported", start);
+        }
+      } else if (second >= 0x80 && second <= 0x8f) {
         const displacement = this.#fetchSigned(4);
         if (this.#condition(second & 15)) this.#branch(displacement, start);
       } else if ([0xb6, 0xb7, 0xbe, 0xbf].includes(second)) {
