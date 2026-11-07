@@ -171,3 +171,51 @@ test("large-page walker rejects reserved misaligned address bits", () => {
   mmu.setPageTableRoot(0n);
   assert.throws(() => mmu.translate(0x200000n), error => error instanceof PageFault && error.reserved && (error.errorCode & 8) !== 0);
 });
+
+
+test("legacy 32-bit paging translates 4 KiB pages and sets accessed/dirty bits", async () => {
+  const { X86LegacyPaging32 } = await import("../packages/runtime/src/mmu.js");
+  const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
+  const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
+  const get32 = address => { const b=memory.read(address,4); return (b[0]|(b[1]<<8)|(b[2]<<16)|(b[3]<<24))>>>0; };
+  put32(0, 0x1000 | 7);
+  put32(0x1000 + 2*4, 0x3000 | 7);
+  const paging = new X86LegacyPaging32(memory);
+  paging.loadCr3(0);
+  memory.write(0x300a, Uint8Array.of(0x42));
+  assert.equal(paging.translate(0x200a), 0x300a);
+  assert.deepEqual([...paging.read(0x200a,1)], [0x42]);
+  paging.write(0x200a, Uint8Array.of(0x55));
+  assert.equal(memory.read(0x300a,1)[0],0x55);
+  assert.equal((get32(0)&0x20)!==0,true);
+  assert.equal((get32(0x1008)&0x60),0x60);
+});
+
+test("legacy 32-bit paging enforces user, write-protect and supervisor override", async () => {
+  const { X86LegacyPaging32 } = await import("../packages/runtime/src/mmu.js");
+  const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
+  const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
+  put32(0, 0x1000 | 3);
+  put32(0x1000, 0x2000 | 3); // supervisor, read-only at both levels
+  const paging = new X86LegacyPaging32(memory, { writeProtect: true });
+  paging.loadCr3(0);
+  assert.throws(() => paging.translate(0, { user:true }), error => error instanceof PageFault && error.present && error.user);
+  assert.throws(() => paging.translate(0, { write:true }), error => error instanceof PageFault && error.present && error.write);
+  paging.setControl({ writeProtect:false });
+  assert.equal(paging.translate(0, { write:true }), 0x2000);
+});
+
+test("legacy 32-bit paging supports CR4.PSE 4 MiB pages and rejects reserved bits", async () => {
+  const { X86LegacyPaging32 } = await import("../packages/runtime/src/mmu.js");
+  const memory = new GuestMemory({ initialPages: 5, maximumPages: 5 });
+  const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
+  put32(0, 0x83); // 4 MiB page, present and writable
+  memory.write(0x2345, Uint8Array.of(0x6a));
+  const paging = new X86LegacyPaging32(memory, { pse:true });
+  paging.loadCr3(0);
+  assert.equal(paging.translate(0x2345),0x2345);
+  assert.equal(paging.read(0x2345,1)[0],0x6a);
+  put32(0,0x2083); // reserved alignment bit
+  paging.flush();
+  assert.throws(() => paging.translate(0x2345), error => error instanceof PageFault && error.reserved);
+});
