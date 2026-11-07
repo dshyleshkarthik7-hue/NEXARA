@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { GuestMemory } from "../packages/runtime/src/index.js";
-import { GuestAddressSpace } from "../packages/runtime/src/mmu.js";
+import { GuestAddressSpace, PageFault } from "../packages/runtime/src/mmu.js";
 import { X86Tss64 } from "../packages/x86-core/src/task-state.js";
 import { X86Cpu } from "../packages/x86-core/src/index.js";
 
@@ -113,4 +113,14 @@ test("long-mode interrupt frame writes through supervisor-only virtual mapping",
   const frame = new DataView(memory.read(0x2000 + 0xfd8, 40).buffer);
   assert.equal(frame.getBigUint64(0, true), 0x602n);
   assert.equal(frame.getBigUint64(24, true), 0x4800n);
+});
+
+test("ring-3 data reads and writes cannot access supervisor-only mapped pages", () => {
+  const { cpu, memory } = setupLongMode({ addressSpaceEnabled: true });
+  cpu.setRegister(3, 0x2000n, 64);
+  memory.write(0x600, Uint8Array.of(0x8b, 0x03)); // mov eax, [rbx]
+  assert.throws(() => cpu.step(), error => error instanceof PageFault && error.user === true);
+  cpu.ip = 0x600;
+  memory.write(0x600, Uint8Array.of(0x89, 0x03)); // mov [rbx], eax
+  assert.throws(() => cpu.step(), error => error instanceof PageFault && error.user === true);
 });
