@@ -51,6 +51,7 @@ export class X86Cpu {
     const pae = (cr4 & (1n << 5n)) !== 0n;
     const lme = (this.efer & (1n << 8n)) !== 0n;
     if (paging && (cr0 & 1n) === 0n) throw new CpuFault("CR0.PG requires CR0.PE", this.ip);
+    if (paging && this.mode !== 64) throw new CpuFault("32-bit paging is not implemented by this MMU", this.ip);
     if (paging && this.mode === 64 && !pae) throw new CpuFault("Long-mode paging requires CR4.PAE", this.ip);
     if (paging && lme && !pae) throw new CpuFault("EFER.LME requires CR4.PAE", this.ip);
     if (this.mode === 64 && paging && lme) this.efer |= 1n << 10n;
@@ -74,7 +75,7 @@ export class X86Cpu {
       if ((next & 0xfffn) !== 0n) throw new CpuFault("CR3 must be 4 KiB aligned", this.ip);
       if (next >= BigInt(this.memory.byteLength)) throw new CpuFault("CR3 exceeds guest physical memory", this.ip);
     } else if (index === 4) {
-      const allowed = 0x0000000000777fffn;
+      const allowed = 0x0000000000000020n; // PAE only; other CR4 features are not implemented
       if ((next & ~allowed) !== 0n) throw new CpuFault("CR4 contains reserved bits", this.ip);
       if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n && this.mode === 64 && (next & (1n << 5n)) === 0n) {
         throw new CpuFault("Cannot clear CR4.PAE while paging is active in 64-bit mode", this.ip);
