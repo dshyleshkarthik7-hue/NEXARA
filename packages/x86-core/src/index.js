@@ -72,7 +72,7 @@ export class X86Cpu {
     const pae = (cr4 & (1n << 5n)) !== 0n;
     const lme = (this.efer & (1n << 8n)) !== 0n;
     if (paging && (cr0 & 1n) === 0n) throw new CpuFault("CR0.PG requires CR0.PE", this.ip);
-    if (paging && this.mode !== 64 && !this.legacyPaging32) throw new CpuFault("32-bit paging requires the legacy paging backend", this.ip);
+    if (paging && this.mode !== 64 && !this.legacyPaging32) throw new CpuFault("32-bit paging is not implemented without the legacy paging backend", this.ip);
     if (paging && this.mode === 32 && (cr4 & (1n << 5n)) !== 0n) throw new CpuFault("PAE paging is not implemented by the legacy backend", this.ip);
     if (paging && this.mode === 64 && !pae) throw new CpuFault("Long-mode paging requires CR4.PAE", this.ip);
     if (paging && lme && !pae) throw new CpuFault("EFER.LME requires CR4.PAE", this.ip);
