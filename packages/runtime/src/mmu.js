@@ -147,6 +147,34 @@ export class GuestAddressSpace {
     return this.read(virtualAddress, length, { ...options, read: false, execute: true });
   }
 
+  snapshot() {
+    return [...this.#mappings.entries()].map(([page, entry]) => ({
+      virtual: (page << PAGE_BITS).toString(),
+      physical: entry.physical.toString(),
+      read: entry.read,
+      write: entry.write,
+      execute: entry.execute,
+      user: entry.user
+    }));
+  }
+
+  restore(snapshot) {
+    if (!Array.isArray(snapshot)) throw new TypeError("Invalid address-space snapshot");
+    const next = new GuestAddressSpace(this.memory, {
+      physicalAddressBits: this.physicalAddressBits,
+      virtualAddressBits: this.virtualAddressBits
+    });
+    for (const entry of snapshot) {
+      if (!entry || typeof entry.virtual !== "string" || typeof entry.physical !== "string"
+        || !["read", "write", "execute", "user"].every(key => typeof entry[key] === "boolean")) {
+        throw new TypeError("Invalid address-space mapping snapshot");
+      }
+      next.map(BigInt(entry.virtual), BigInt(entry.physical), entry);
+    }
+    this.#mappings = next.#mappings;
+    this.#tlb.clear();
+  }
+
   get mappingCount() { return this.#mappings.size; }
   flush() { this.#tlb.clear(); }
 }
