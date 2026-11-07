@@ -91,3 +91,5 @@ export class GuestMemory {
     this.#bytes = snapshot.slice();
   }
 }
+
+export { Pic8259, Pit8253 } from "./devices.js";
