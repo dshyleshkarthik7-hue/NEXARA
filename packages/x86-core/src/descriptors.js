@@ -111,7 +111,7 @@ export class X86DescriptorTable {
     return Object.freeze(descriptor);
   }
 
-  /** Decode a 32-bit protected-mode system descriptor (TSS/LDT). */
+  /** Decode GDT LDT/TSS descriptors, including the 16-byte long-mode TSS form. */
   readSystemDescriptor(selector, { allowedTypes = [1, 2, 3, 9, 11], requirePresent = true } = {}) {
     if (this.kind !== "gdt") throw new TypeError("System descriptors must be resolved through the GDT");
     if (!Number.isInteger(selector) || selector <= 0 || selector > 0xffff || (selector & 4) !== 0) {
@@ -121,20 +121,26 @@ export class X86DescriptorTable {
       throw new TypeError("allowedTypes must contain descriptor type nibbles");
     }
     const index = selector >>> 3;
-    const bytes = this.#read(index * 8, 8);
+    const longTss = this.longMode && allowedTypes.some(type => type === 9 || type === 11);
+    const width = longTss ? 16 : 8;
+    const bytes = this.#read(index * 8, width);
     const access = bytes[5];
     const type = access & 0x0f;
     const present = (access & 0x80) !== 0;
     if ((access & 0x10) !== 0) throw new Error("Descriptor is a code/data descriptor, not a system descriptor");
     if (!allowedTypes.includes(type)) throw new Error("Unsupported system descriptor type");
     if (requirePresent && !present) throw new Error("System descriptor is not present");
+    if (longTss && bytes.slice(12, 16).some(value => value !== 0)) {
+      throw new Error("Reserved long-mode TSS descriptor fields must be zero");
+    }
     const limitLow = Number(this.#u16(bytes, 0));
     const baseLow = this.#u16(bytes, 2);
-    const base = baseLow | (BigInt(bytes[4]) << 16n) | (BigInt(bytes[7]) << 24n);
+    let base = baseLow | (BigInt(bytes[4]) << 16n) | (BigInt(bytes[7]) << 24n);
+    if (longTss) base |= this.#u32(bytes, 8) << 32n;
     let limit = BigInt(limitLow | ((bytes[6] & 0x0f) << 16));
     if ((bytes[6] & 0x80) !== 0) limit = (limit << 12n) | 0xfffn;
     return Object.freeze({ selector, index, type, present, dpl: (access >>> 5) & 3,
-      base, limit, available: (bytes[6] & 0x10) !== 0, raw: bytes });
+      base, limit, available: (bytes[6] & 0x10) !== 0, raw: bytes, width });
   }
 
   readGate(vector, { cpl = 0, software = false } = {}) {
