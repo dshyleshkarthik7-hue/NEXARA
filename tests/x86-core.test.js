@@ -653,3 +653,15 @@ test("LLDT loads an LDT descriptor and LTR marks an available 32-bit TSS busy", 
   assert.equal(cpu.systemTables.task.busy, true);
   assert.equal(cpu.memory.read(0x115, 1)[0] & 0x0f, 0x0b);
 });
+
+
+test("32-bit protected-mode far JMP loads CS and fetches through its segment cache", () => {
+  const cpu = cpuFor([0xea,0x10,0,0,0,0x08,0x00,0xf4], 32);
+  cpu.memory.write(8, Uint8Array.from([0xff,0xff,0,0,0,0x9a,0xcf,0]));
+  cpu.memory.write(0x10, Uint8Array.of(0xf4));
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  cpu.run({ maxInstructions: 2 });
+  assert.equal(cpu.segments.snapshot().cs.selector, 0x08);
+  assert.equal(cpu.ip, 0x11);
+  assert.equal(cpu.halted, true);
+});
