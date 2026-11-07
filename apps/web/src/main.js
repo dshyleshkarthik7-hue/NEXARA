@@ -1,3 +1,5 @@
+import { IndexedDbWorkspaceStore } from "../../../packages/workspace/src/index.js";
+
 const API = import.meta.env.VITE_API_URL || "http://localhost:8787";
 const editor = document.querySelector("#editor");
 const lineNumbers = document.querySelector("#line-numbers");
@@ -6,9 +8,16 @@ const input = document.querySelector("#terminal-input");
 const send = document.querySelector("#send-input");
 const status = document.querySelector("#terminal-status");
 const connection = document.querySelector("#connection-label");
+const saveStatus = document.querySelector("#editor-save-status");
+const fileList = document.querySelector("#workspace-files");
 let sessionId = null;
 let sessionToken = null;
 let socket = null;
+let workspace = null;
+let currentFile = "untitled.txt";
+let currentRevision = null;
+let saveTimer = null;
+let saveQueue = Promise.resolve();
 
 function updateEditorMeta() {
   const lines = editor.value.split("\n").length;
@@ -17,9 +26,112 @@ function updateEditorMeta() {
   const row = before.split("\n");
   document.querySelector("#cursor-position").textContent = `Ln ${row.length}, Col ${row.at(-1).length + 1}`;
 }
-editor.addEventListener("input", updateEditorMeta);
+editor.addEventListener("input", () => {
+  updateEditorMeta();
+  scheduleSave();
+});
 editor.addEventListener("click", updateEditorMeta);
 editor.addEventListener("keyup", updateEditorMeta);
+
+function setSaveStatus(message) {
+  if (saveStatus) saveStatus.textContent = message;
+}
+
+function renderFileList(files) {
+  fileList.replaceChildren();
+  for (const file of files) {
+    const button = document.createElement("button");
+    button.className = "file-item" + (file.path === currentFile ? " active" : "");
+    button.type = "button";
+    button.textContent = file.path;
+    button.addEventListener("click", () => openFile(file.path));
+    fileList.append(button);
+  }
+}
+
+async function refreshFiles() {
+  renderFileList(await workspace.list());
+}
+
+async function openFile(path) {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    await saveCurrentFile();
+  }
+  const record = await workspace.read(path);
+  if (!record) return;
+  currentFile = record.path;
+  currentRevision = record.revision;
+  editor.value = record.content;
+  document.querySelector("#active-filename").textContent = currentFile;
+  updateEditorMeta();
+  setSaveStatus("Saved locally");
+  await refreshFiles();
+}
+
+async function saveCurrentFile() {
+  if (!workspace) return;
+  const content = editor.value;
+  const path = currentFile;
+  const expectedRevision = currentRevision;
+  saveQueue = saveQueue.then(async () => {
+    try {
+      setSaveStatus("Saving…");
+      const record = await workspace.write(path, content, { expectedRevision });
+      if (path === currentFile && content === editor.value) {
+        currentRevision = record.revision;
+        setSaveStatus("Saved locally");
+      }
+      await refreshFiles();
+    } catch (error) {
+      if (error.name === "WorkspaceConflictError") {
+        setSaveStatus("Save conflict — another tab changed this file");
+      } else {
+        setSaveStatus("Save failed");
+        console.error("NEXARA workspace save failed", error);
+      }
+    }
+  }).catch(error => console.error("Workspace save queue failed", error));
+  return saveQueue;
+}
+
+function scheduleSave() {
+  setSaveStatus("Unsaved changes");
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    void saveCurrentFile();
+  }, 400);
+}
+
+async function initializeWorkspace() {
+  try {
+    workspace = new IndexedDbWorkspaceStore();
+    let files = await workspace.list();
+    if (!files.some(file => file.path === "untitled.txt")) {
+      await workspace.write("untitled.txt", "Welcome to NEXARA. Your edits are saved in this browser.");
+    }
+    files = await workspace.list();
+    renderFileList(files);
+    await openFile(files.some(file => file.path === "untitled.txt") ? "untitled.txt" : files[0].path);
+  } catch (error) {
+    setSaveStatus("Browser storage unavailable");
+    console.error("NEXARA workspace could not initialize", error);
+    editor.disabled = true;
+  }
+}
+
+document.querySelector("#new-file").addEventListener("click", async () => {
+  const path = window.prompt("New workspace file path (for example, src/main.js):");
+  if (!path) return;
+  try {
+    const record = await workspace.write(path, "", { expectedRevision: null });
+    await openFile(record.path);
+  } catch (error) {
+    window.alert(error.message);
+  }
+});
 
 function appendOutput(value) {
   const line = document.createElement("span");
@@ -87,3 +199,4 @@ fetch(`${API}/health`).then(r => {
   connection.textContent = "Server online";
 }).catch(() => { connection.textContent = "Server unavailable"; });
 updateEditorMeta();
+void initializeWorkspace();
