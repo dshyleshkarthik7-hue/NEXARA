@@ -37,16 +37,21 @@ export function sandboxCapabilities({ runtime = "runsc", imageConfigured = false
   return Object.freeze({
     id: "docker-sandbox",
     available: Boolean(imageConfigured),
-    isolated: runtime !== "runc",
+    // Only Kata provides a guest-kernel boundary; runsc is a syscall sandbox
+    // and runc is ordinary container isolation. All still rely on host kernel.
+    isolated: runtime === "kata" || runtime === "io.containerd.kata.v2",
+    sandboxed: runtime !== "runc",
     isolationRuntime: runtime,
-    sharedHostKernel: true,
+    sharedHostKernel: runtime !== "kata" && runtime !== "io.containerd.kata.v2",
     networkAccess: false,
     hostFilesystemMounts: false,
     readOnlyRootFilesystem: true,
     droppedCapabilities: true,
     resourceLimits: true,
     warning: runtime === "runc"
-      ? "runc shares the host kernel; not suitable as the sole boundary for hostile guests"
-      : "Container isolation still shares the host kernel; use a dedicated microVM for high-risk workloads"
+      ? "runc is ordinary container isolation and shares the host kernel; not suitable for hostile guests"
+      : runtime === "runsc"
+        ? "gVisor adds a syscall isolation layer but still relies on the host kernel; use Kata or a dedicated microVM for hostile guest kernels"
+        : "Kata uses a lightweight VM boundary; still requires host hardening, policy enforcement and escape testing"
   });
 }
