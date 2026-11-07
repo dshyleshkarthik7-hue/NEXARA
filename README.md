@@ -66,7 +66,7 @@ Compatibility and performance claims will be made only against reproducible conf
 
 ## Security boundary
 
-The server defaults to loopback binding. Browser origins are allowlisted, and each PTY session has a separate random secret. These controls are useful hardening but are **not** a complete multi-user security boundary. PTY processes still run with the server process user's OS privileges. Before exposing the service to untrusted networks, add user authentication, per-user authorization, process/container or VM isolation, resource quotas, TLS, audit logging, and deployment-specific threat review. Do not run the service as root.
+The server defaults to loopback binding. Browser origins are allowlisted, and each PTY session has a separate random secret. Unsandboxed host PTY sessions are now disabled by default; trusted local development can explicitly set NEXARA_ALLOW_UNSANDBOXED_HOST_PTY=true, and this opt-in is rejected on non-loopback binds. This does not make the PTY isolated: it still runs with the server process user's OS privileges. Do not enable it for untrusted users or public deployments. See SECURITY-ARCHITECTURE.md for the required microVM boundary, capability broker, threat model and acceptance gates.
 
 ## Configuration
 
@@ -78,6 +78,7 @@ The server defaults to loopback binding. Browser origins are allowlisted, and ea
 - `NEXARA_SESSION_CREATE_LIMIT`: session creation attempts per client per minute (default `8`).
 - `NEXARA_SESSION_IDLE_MS`: idle PTY lifetime in milliseconds (default `1800000`, minimum `60000`).
 - `NEXARA_SHELL`: shell executable override.
+- `NEXARA_ALLOW_UNSANDBOXED_HOST_PTY`: explicitly enable the trusted-local-development PTY backend (true only; disabled by default and prohibited on non-loopback binds).
 - `NEXARA_WORKDIR`: initial working directory.
 
 ## License
