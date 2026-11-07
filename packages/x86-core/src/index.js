@@ -382,8 +382,9 @@ export class X86Cpu {
     } else if (opcode === 0xff) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       const extension = decoded.reg & 7;
-      const operandWidth = this.mode === 64 ? (rex & 8 ? 64 : 32) : width;
-      const value = this.#readOperand(decoded.operand, operandWidth);
+      const arithmeticWidth = this.mode === 64 ? (rex & 8 ? 64 : 32) : width;
+      const controlWidth = this.#stackWidth(width);
+      const value = this.#readOperand(decoded.operand, [2, 4, 6].includes(extension) ? controlWidth : arithmeticWidth);
       if (extension === 0 || extension === 1) {
         const carry = this.flags & CF;
         const result = this.#alu(extension === 0 ? "add" : "sub", value, 1n, operandWidth);
