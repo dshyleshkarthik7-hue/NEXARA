@@ -22,17 +22,17 @@ test("decodes a present ring-0 flat code descriptor", () => {
 
 test("decodes a writable data descriptor and enforces privilege", () => {
   const { memory, table } = memoryWithTable();
-  memory.write(0x108, Uint8Array.from([0xff,0xff,0,0,0,0xf2,0xcf,0]));
-  const descriptor = table.readSegment(8, { cpl: 3 });
+  memory.write(0x108, Uint8Array.from([0xff,0xff,0,0,0,0x92,0xcf,0]));
+  const descriptor = table.readSegment(8, { cpl: 0 });
   assert.equal(descriptor.writable, true);
-  assert.equal(descriptor.dpl, 3);
-  assert.throws(() => table.readSegment(8, { cpl: 0 }), /privilege/);
+  assert.equal(descriptor.dpl, 0);
+  assert.throws(() => table.readSegment(8, { cpl: 3 }), /privilege/);
 });
 
 test("returns null for the null selector and rejects out-of-limit descriptors", () => {
   const { table } = memoryWithTable();
   assert.equal(table.readSegment(0), null);
-  assert.throws(() => table.readSegment(0x7f8), /limit/);
+  assert.throws(() => table.readSegment(0x800), /limit/);
 });
 
 test("decodes a 64-bit interrupt gate including high offset and IST", () => {
@@ -57,10 +57,10 @@ test("IDT software interrupt gate checks DPL and presence", () => {
   const memory = new GuestMemory({ initialPages: 1, maximumPages: 1 });
   const idt = new X86DescriptorTable(memory, { base: 0, limit: 0xfff, kind: "idt" });
   const gate = new Uint8Array(16);
-  gate[2] = 8; gate[5] = 0xee; // present DPL3 interrupt gate
+  gate[2] = 8; gate[5] = 0x8e; // present DPL0 interrupt gate
   memory.write(3 * 16, gate);
-  assert.equal(idt.readGate(3, { cpl: 3, software: true }).dpl, 3);
-  assert.throws(() => idt.readGate(3, { cpl: 0, software: true }), /privilege/);
+  assert.equal(idt.readGate(3, { cpl: 0, software: true }).dpl, 0);
+  assert.throws(() => idt.readGate(3, { cpl: 3, software: true }), /privilege/);
   gate[5] = 0x0e;
   memory.write(4 * 16, gate);
   assert.throws(() => idt.readGate(4), /not-present/);
@@ -70,7 +70,7 @@ test("rejects invalid table bounds and selector values", () => {
   const { table } = memoryWithTable();
   assert.throws(() => table.setRegister(0xffffn, 0xffff), /memory/);
   assert.throws(() => table.readSegment(-1), /selector/);
-  assert.throws(() => table.readSegment(4), /LDT/);
+  assert.throws(() => table.readSegment(0x0c), /LDT/);
 });
 
 test("rejects reserved fields and task gates in 64-bit IDT entries", () => {
