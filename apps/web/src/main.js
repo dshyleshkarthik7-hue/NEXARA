@@ -137,6 +137,51 @@ document.querySelector("#new-file").addEventListener("click", async () => {
   }
 });
 
+const importInput = document.querySelector("#file-import");
+document.querySelector("#import-file").addEventListener("click", () => importInput.click());
+importInput.addEventListener("change", async () => {
+  const file = importInput.files?.[0];
+  importInput.value = "";
+  if (!file) return;
+  try {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await saveCurrentFile(); }
+    await saveQueue;
+    const existing = await workspace.read(file.name);
+    const record = await workspace.write(file.name, await file.text(), {
+      expectedRevision: existing?.revision ?? null
+    });
+    fileRevisions.set(record.path, record.revision);
+    await openFile(record.path);
+    setSaveStatus("Imported and saved locally");
+  } catch (error) {
+    window.alert(error.message);
+  }
+});
+
+document.querySelector("#export-file").addEventListener("click", async () => {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await saveCurrentFile(); }
+  await saveQueue;
+  const blob = new Blob([editor.value], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = currentFile.split("/").at(-1);
+  link.click();
+  URL.revokeObjectURL(url);
+});
+
+editor.addEventListener("keydown", event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    void saveCurrentFile();
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "o") {
+    event.preventDefault();
+    importInput.click();
+  }
+});
+
 function appendOutput(value) {
   const line = document.createElement("span");
   line.textContent = value;
