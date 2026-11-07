@@ -169,7 +169,10 @@ export class X86Cpu {
   #alu(operation, left, right, width) {
     const a = left & this.#mask(width);
     const b = right & this.#mask(width);
-    const result = operation === "add" ? a + b : operation === "sub" || operation === "cmp" ? a - b : a ^ b;
+    const result = operation === "add" ? a + b
+      : operation === "sub" || operation === "cmp" ? a - b
+      : operation === "and" || operation === "test" ? a & b
+      : operation === "or" ? a | b : a ^ b;
     this.#setArithmeticFlags(result, a, b, width, operation === "cmp" ? "sub" : operation);
     return result & this.#mask(width);
   }
@@ -258,15 +261,17 @@ export class X86Cpu {
     } else if (opcode === 0x68 || opcode === 0x6a) {
       const immediate = opcode === 0x6a ? this.#fetchSigned(1) : this.#fetchSigned(width === 16 ? 2 : 4);
       this.#push(immediate, this.#stackWidth(width));
-    } else if ([0x89,0x8b,0x01,0x03,0x29,0x2b,0x31,0x33,0x39,0x3b].includes(opcode)) {
+    } else if ([0x89,0x8b,0x01,0x03,0x09,0x0b,0x21,0x23,0x29,0x2b,0x31,0x33,0x39,0x3b,0x85].includes(opcode)) {
       const { reg, operand } = this.#decodeModRM(rex, addressWidth);
       const regValue = this.getRegister(reg, width);
       const operandValue = this.#readOperand(operand, width);
       if (opcode === 0x89) this.#writeOperand(operand, regValue, width);
       if (opcode === 0x8b) this.setRegister(reg, operandValue, width);
-      if (opcode === 0x01 || opcode === 0x03) {
-        const result = this.#alu("add", opcode === 0x01 ? operandValue : regValue, opcode === 0x01 ? regValue : operandValue, width);
-        if (opcode === 0x01) this.#writeOperand(operand, result, width); else this.setRegister(reg, result, width);
+      if (opcode === 0x01 || opcode === 0x03 || opcode === 0x09 || opcode === 0x0b || opcode === 0x21 || opcode === 0x23) {
+        const isReverse = [0x03,0x0b,0x23].includes(opcode);
+        const operation = [0x09,0x0b].includes(opcode) ? "or" : [0x21,0x23].includes(opcode) ? "and" : "add";
+        const result = this.#alu(operation, isReverse ? regValue : operandValue, isReverse ? operandValue : regValue, width);
+        if ([0x01,0x09,0x21].includes(opcode)) this.#writeOperand(operand, result, width); else this.setRegister(reg, result, width);
       }
       if (opcode === 0x29 || opcode === 0x2b || opcode === 0x39 || opcode === 0x3b) {
         const reverse = opcode === 0x2b || opcode === 0x3b;
@@ -274,9 +279,10 @@ export class X86Cpu {
         if (opcode === 0x29) this.#writeOperand(operand, result, width);
         if (opcode === 0x2b) this.setRegister(reg, result, width);
       }
-      if (opcode === 0x31 || opcode === 0x33) {
-        const result = this.#alu("xor", opcode === 0x31 ? operandValue : regValue, opcode === 0x31 ? regValue : operandValue, width);
-        if (opcode === 0x31) this.#writeOperand(operand, result, width); else this.setRegister(reg, result, width);
+      if (opcode === 0x31 || opcode === 0x33 || opcode === 0x85) {
+        const result = this.#alu(opcode === 0x85 ? "test" : "xor", opcode === 0x31 || opcode === 0x85 ? operandValue : regValue, opcode === 0x31 || opcode === 0x85 ? regValue : operandValue, width);
+        if (opcode === 0x31) this.#writeOperand(operand, result, width);
+        else if (opcode === 0x33) this.setRegister(reg, result, width);
       }
     } else if (opcode === 0x8d) {
       const decoded = this.#decodeModRM(rex, addressWidth);
@@ -300,11 +306,11 @@ export class X86Cpu {
       const left = this.#readOperand(decoded.operand, width);
       const result = this.#alu(operation, left, immediate, width);
       if (operation !== "cmp") this.#writeOperand(decoded.operand, result, width);
-    } else if ([0x05,0x2d,0x35,0x3d].includes(opcode)) {
+    } else if ([0x05,0x0d,0x25,0x2d,0x35,0x3d].includes(opcode)) {
       const bytes = width === 64 ? 4 : width / 8;
       let immediate = this.#fetchUnsigned(bytes);
       if (width === 64 && (immediate & 0x80000000n)) immediate |= 0xffffffff00000000n;
-      const operation = opcode === 0x05 ? "add" : opcode === 0x2d ? "sub" : opcode === 0x35 ? "xor" : "cmp";
+      const operation = opcode === 0x05 ? "add" : opcode === 0x0d ? "or" : opcode === 0x25 ? "and" : opcode === 0x2d ? "sub" : opcode === 0x35 ? "xor" : "cmp";
       const result = this.#alu(operation, this.getRegister(0, width), immediate, width);
       if (operation !== "cmp") this.setRegister(0, result, width);
     } else if (opcode === 0xeb || opcode === 0xe9 || opcode === 0xe8) {
