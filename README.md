@@ -91,3 +91,7 @@ The repository contains an experimental, deliberately bounded instruction interp
 ## System-table register state
 
 `packages/x86-core/src/system-tables.js` provides bounded architectural state storage for GDTR, IDTR, LDTR and the task register. It validates selector forms, table limits and guest physical-memory bounds, and supports validated snapshots/restoration. This is not instruction execution: LGDT/LIDT/LLDT/LTR, descriptor type resolution, CPL transitions, task switching, interrupt stack frames and IRET are not implemented by this component.
+
+## CPU-integrated segment-cache model
+
+The CPU now owns an `X86SegmentState` instance backed by its GDT view. Segment-cache state is included in CPU snapshots and is restored by re-reading selectors against the restored guest memory and GDTR. The current implementation supports descriptor-validated DS/ES/FS/GS loads, writable SS loads, and validated CS-cache installation for trusted control-transfer code. This is still not full protected-mode execution: instruction decoding for MOV Sreg and LGDT/LIDT/LLDT/LTR, CR0.PE transitions, far control transfers, call gates, ring transitions, stack switching, segment-based linear-address checks and interrupt/IRET delivery remain unimplemented.
