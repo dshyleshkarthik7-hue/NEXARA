@@ -108,3 +108,6 @@ This is not complete protected mode. Real-mode execution and transitions, full d
 ## Signed VM capability leases
 
 `packages/security/src/lease.js` implements server-side HMAC-SHA-256 VM leases bound to a tenant subject and SHA-256 guest-image digest. Leases carry an expiry, bounded CPU/memory/disk quotas, explicit device/file capabilities and explicit egress host allowlists. Verification uses constant-time signature comparison and can bind the lease to the expected subject and image digest. This is a policy primitive, not an isolation boundary: it is not yet connected to a microVM supervisor or device/network broker, and it does not provide revocation or replay prevention by itself. Keep signing keys in a secret manager and do not expose them to browser code.
+
+
+A further constrained 32-bit ring-0 interrupt path supports software INT/INT3 through present IDT interrupt/trap gates and same-privilege IRET frames. It does not implement hardware IRQ routing, exception prioritization/error-code frames, privilege-changing gates, TSS/IST stack switching, nested-fault escalation or full architectural EFLAGS restoration. It must not be used as a kernel-ready interrupt controller.
