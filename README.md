@@ -2,23 +2,22 @@
 
 **Native Execution & Exchange Architecture** — a unified browser-and-server computing workspace.
 
-NEXARA combines a lightweight native editor, an interactive terminal, a secure session gateway, and a runtime boundary designed to host multiple execution backends. The browser is the control surface; server sessions use real operating-system processes and a PTY.
+NEXARA combines a lightweight editor, browser terminal client, server session gateway, and a runtime boundary for multiple execution backends. The browser is the control surface; server sessions currently use host operating-system processes through a PTY.
 
 ## Current implementation
 
 - Browser workspace with a lightweight editor and terminal client.
 - Server-side PTY sessions over WebSocket.
-- Session lifecycle, bounded input, resize handling, and origin checks.
-- Shared protocol definitions and runtime-backend contract.
-- Automated tests for protocol validation and server routes.
+- Per-session random credentials, constant-time credential comparison, WebSocket origin allowlisting, bounded input, and a configurable session ceiling.
+- Reduced environment inheritance for spawned shells.
+- Shared client/server protocol and a bounds-checked guest-memory primitive with snapshots.
+- Automated protocol and memory-boundary tests.
 
-## Requirements
+## Requirements and run
 
 - Node.js 20+
 - npm 10+
-- Linux/macOS for the PTY-backed server (Windows requires a compatible PTY environment).
-
-## Run
+- A supported native build environment for `node-pty`.
 
 ```sh
 npm install
@@ -27,7 +26,7 @@ npm run dev
 
 Open http://localhost:5173. The API listens on http://localhost:8787.
 
-For a production build:
+Production build and server:
 
 ```sh
 npm run build
@@ -36,20 +35,30 @@ npm start
 
 ## Architecture
 
-- `apps/web`: browser workspace, editor, terminal view.
-- `apps/server`: HTTP API and PTY/WebSocket session host.
-- `packages/protocol`: versioned client/server messages.
-- `packages/runtime`: execution-backend interface and capability model.
+- `apps/web`: browser workspace and terminal client.
+- `apps/server`: HTTP API and authenticated PTY/WebSocket session host.
+- `packages/protocol`: versioned and validated client/server messages.
+- `packages/runtime`: execution-backend contract and guest-memory primitives.
+- `tests`: protocol and memory safety tests.
 
 ## Compatibility status
 
-NEXARA does **not** yet claim full x86 32-bit or x86-64 machine compatibility. The runtime package defines the integration boundary; a complete CPU/device/firmware/ABI implementation and its conformance suite remain engineering work. Server PTY sessions execute programs supported by the host OS; they are not virtual machines.
+NEXARA does **not** yet provide full x86 32-bit or x86-64 machine compatibility. The guest-memory primitive is not an x86 memory-management unit, CPU, or emulator. Full compatibility requires instruction execution, privilege and exception semantics, virtual memory, interrupt/timer behavior, firmware and device models, storage, networking, boot support, and Linux ABI conformance. Server PTY sessions execute programs supported by the host OS; they are not virtual machines.
 
-Performance and compatibility claims will be published only with reproducible benchmarks and conformance results.
+Compatibility and performance claims will be made only against reproducible conformance suites and benchmarks.
 
-## Security notes
+## Security boundary
 
-Bind the server to a trusted interface, configure allowed browser origins, and put it behind authenticated access before exposing it to an untrusted network. PTY sessions execute with the server process user's privileges. Do not run this service as root or expose it publicly without adding user authentication, isolation, quotas, and transport security.
+The server defaults to loopback binding. Browser origins are allowlisted, and each PTY session has a separate random secret. These controls are useful hardening but are **not** a complete multi-user security boundary. PTY processes still run with the server process user's OS privileges. Before exposing the service to untrusted networks, add user authentication, per-user authorization, process/container or VM isolation, resource quotas, TLS, audit logging, and deployment-specific threat review. Do not run the service as root.
+
+## Configuration
+
+- `HOST`: bind address (default `127.0.0.1`).
+- `PORT`: HTTP/WebSocket port (default `8787`).
+- `ALLOWED_ORIGINS`: comma-separated browser origins (default `http://localhost:5173`).
+- `NEXARA_MAX_SESSIONS`: maximum concurrent PTY sessions (default `4`).
+- `NEXARA_SHELL`: shell executable override.
+- `NEXARA_WORKDIR`: initial working directory.
 
 ## License
 
