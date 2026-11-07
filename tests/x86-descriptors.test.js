@@ -84,3 +84,23 @@ test("rejects reserved fields and task gates in 64-bit IDT entries", () => {
   memory.write(0, reserved);
   assert.throws(() => idt.readGate(0), /gate type/);
 });
+
+test("decodes and validates a present 32-bit TSS system descriptor", () => {
+  const { memory, table } = memoryWithTable();
+  memory.write(0x108, Uint8Array.from([0x67, 0x00, 0x78, 0x56, 0x34, 0x89, 0x00, 0x12]));
+  const descriptor = table.readSystemDescriptor(8, { allowedTypes: [9] });
+  assert.equal(descriptor.type, 9);
+  assert.equal(descriptor.present, true);
+  assert.equal(descriptor.base, 0x12345678n);
+  assert.equal(descriptor.limit, 0x67n);
+  assert.throws(() => table.readSystemDescriptor(8, { allowedTypes: [2] }), /type/);
+});
+
+test("rejects absent, non-system and out-of-limit system descriptors", () => {
+  const { memory, table } = memoryWithTable();
+  memory.write(0x108, Uint8Array.from([0x67, 0, 0, 0, 0, 0x09, 0, 0]));
+  assert.throws(() => table.readSystemDescriptor(8, { allowedTypes: [9] }), /not present/);
+  memory.write(0x108, Uint8Array.from([0x67, 0, 0, 0, 0, 0x92, 0, 0]));
+  assert.throws(() => table.readSystemDescriptor(8), /code\/data/);
+  assert.throws(() => table.readSystemDescriptor(0x800), /limit/);
+});
