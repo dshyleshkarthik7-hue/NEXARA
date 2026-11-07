@@ -19,7 +19,7 @@ test("loads readable data segments and permits null DS/ES/FS/GS", () => {
   const { gdt } = setup();
   const state = new X86SegmentState({ gdt, cpl: 0 });
   assert.equal(state.loadData("ds", 0x10).writable, true);
-  assert.equal(state.loadData("es", 0).cache, null);
+  assert.equal(state.loadData("es", 0), null);
   assert.throws(() => state.loadData("cs", 0x08), /DS, ES, FS or GS/);
 });
 
