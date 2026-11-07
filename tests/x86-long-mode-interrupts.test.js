@@ -74,4 +74,21 @@ test("long-mode interrupt selects IST1 instead of RSP0 when the gate requests it
   cpu.step();
   assert.equal(cpu.segments.cpl, 0);
   assert.equal(cpu.getRegister(4, 64), 0x4000n - 40n);
+  cpu.step();
+  assert.equal(cpu.segments.cpl, 3);
+  assert.equal(cpu.segments.registers.ss.selector, 0x23);
+  assert.equal(cpu.getRegister(4, 64), 0x4800n);
+});
+
+test("long-mode exception entry places a 32-bit error code in an eight-byte frame slot", () => {
+  const { cpu, memory } = setupLongMode();
+  const result = cpu.deliverException(14, { errorCode: 5, returnIp: 0x650 });
+  assert.equal(result.vector, 14);
+  assert.equal(cpu.getRegister(4, 64), 0x3000n - 48n);
+  const frame = new DataView(memory.read(0x3000 - 48, 48).buffer);
+  assert.equal(frame.getBigUint64(0, true), 5n);
+  assert.equal(frame.getBigUint64(8, true), 0x650n);
+  assert.equal(frame.getBigUint64(16, true), 0x1bn);
+  assert.equal(frame.getBigUint64(32, true), 0x4800n);
+  assert.equal(frame.getBigUint64(40, true), 0x23n);
 });
