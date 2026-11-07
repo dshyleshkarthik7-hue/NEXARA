@@ -1,4 +1,5 @@
 import { GuestMemory } from "../../runtime/src/index.js";
+import { X86SystemTableState } from "./system-tables.js";
 
 const REG_NAMES = ["rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15"];
 const CF = 1n, PF = 1n << 2n, ZF = 1n << 6n, SF = 1n << 7n, OF = 1n << 11n;
@@ -38,6 +39,7 @@ export class X86Cpu {
     this.instructionsExecuted = 0;
     this.controlRegisters = new Map([[0, 0x60000010n], [3, 0n], [4, 0n]]);
     this.efer = 0n;
+    this.systemTables = new X86SystemTableState(memory, { longMode: mode === 64 });
   }
 
   readControlRegister(index) {
@@ -668,6 +670,7 @@ export class X86Cpu {
       instructionsExecuted: this.instructionsExecuted,
       controlRegisters: Object.fromEntries([...this.controlRegisters].map(([key,value]) => [String(key), value.toString()])),
       efer: this.efer.toString(),
+      systemTables: this.systemTables.snapshot(),
       memory: this.memory.snapshot(),
       addressSpace: this.addressSpace ? this.addressSpace.snapshot() : null,
       pageTableRoot: this.addressSpace?.pageTableRoot === null || !this.addressSpace ? null : this.addressSpace.pageTableRoot.toString()
@@ -684,6 +687,7 @@ export class X86Cpu {
       || !Number.isSafeInteger(state.instructionsExecuted) || state.instructionsExecuted < 0
       || !state.controlRegisters || !["0","3","4"].every(key => typeof state.controlRegisters[key] === "string" && /^\d+$/.test(state.controlRegisters[key]))
       || typeof state.efer !== "string" || !/^\d+$/.test(state.efer)
+      || !state.systemTables || state.systemTables.format !== "nexara-x86-system-tables-v1"
       || !(state.memory instanceof Uint8Array) || state.memory.byteLength <= state.ip
       || state.memory.byteLength % 4096 !== 0
       || (this.addressSpace && !Array.isArray(state.addressSpace))
@@ -709,6 +713,7 @@ export class X86Cpu {
     this.instructionsExecuted = state.instructionsExecuted;
     this.controlRegisters = new Map(["0","3","4"].map(key => [Number(key), BigInt(state.controlRegisters[key])]));
     this.efer = BigInt(state.efer);
+    this.systemTables.restore(state.systemTables);
     this.#syncPagingState();
   }
 
