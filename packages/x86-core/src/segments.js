@@ -83,6 +83,30 @@ export class X86SegmentState {
     this.cpl = cpl;
   }
 
+  restore(state) {
+    if (!state || state.format !== "nexara-x86-segments-v1" || state.longMode !== this.longMode
+      || !Number.isInteger(state.cpl) || state.cpl < 0 || state.cpl > 3) {
+      throw new TypeError("Invalid or incompatible segment state");
+    }
+    this.cpl = state.cpl;
+    const load = (name, entry) => {
+      if (entry === null) {
+        if (name === "cs" || name === "ss") {
+          this.registers[name] = { selector: 0, cache: null };
+          return;
+        }
+        this.loadData(name, 0);
+        return;
+      }
+      if (!entry || !Number.isInteger(entry.selector)) throw new TypeError(`Invalid ${name.toUpperCase()} segment snapshot`);
+      if (name === "cs") this.installCodeSegment(entry.selector);
+      else if (name === "ss") this.loadStack(entry.selector);
+      else this.loadData(name, entry.selector);
+    };
+    for (const name of ["cs", "ss", "ds", "es", "fs", "gs"]) load(name, state[name]);
+    return this.snapshot();
+  }
+
   snapshot() {
     const cache = value => value.cache ? {
       selector: value.selector, base: value.cache.base.toString(), limit: value.cache.limit.toString(),
