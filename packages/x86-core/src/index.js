@@ -799,19 +799,20 @@ export class X86Cpu {
           if (this.mode === 64) throw new CpuFault("64-bit system-descriptor execution is not yet supported", start);
           try {
             if ((selector & 4) !== 0) throw new Error("LLDT/LTR selector must reference the GDT");
-            const descriptor = this.gdt.readSegment(selector, { cpl: this.segments.cpl });
-            if (!descriptor || !descriptor.system || !descriptor.present) throw new Error("System descriptor is invalid or not present");
-            const raw = descriptor.raw;
-            const access = raw[5];
-            const type = access & 0x0f;
+            const descriptor = this.gdt.readSystemDescriptor(selector, {
+              allowedTypes: extension === 2 ? [2] : [9]
+            });
+            const access = descriptor.raw[5];
             const base = descriptor.base;
             const limit = descriptor.limit;
             if (extension === 2) {
-              if (type !== 2) throw new Error("LLDT requires an LDT system descriptor");
+              if (limit < 7n) throw new Error("LLDT descriptor limit is too small");
               this.systemTables.loadLdtr({ selector, base, limit: Number(limit), present: true, usable: true });
               this.segments.ldt = new X86DescriptorTable(this.memory, { base, limit: Number(limit), kind: "ldt", longMode: false });
             } else {
-              if (type !== 9) throw new Error("LTR requires an available 32-bit TSS descriptor");
+              if (limit < 0x67n) throw new Error("LTR requires a 104-byte 32-bit TSS");
+              // LTR accepts only an available TSS (type 9); the descriptor is
+              // marked busy only after the complete TSS register state validates.
               this.systemTables.loadTaskRegister({ selector, base, limit: Number(limit), present: true, busy: true, usable: true });
               this.memory.write(Number(this.systemTables.gdtr.base) + ((selector >>> 3) * 8) + 5, Uint8Array.of((access & 0xf0) | 0x0b));
             }
