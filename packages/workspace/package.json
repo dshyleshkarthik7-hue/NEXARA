@@ -1,0 +1,6 @@
+{
+  "name": "@nexara/workspace",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.js"
+}
