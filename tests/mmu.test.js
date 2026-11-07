@@ -63,3 +63,13 @@ test("address space supports canonical high-half virtual addresses", () => {
   mmu.map(0xffff800000001000n, 0n, { read: true });
   assert.equal(mmu.translate(0xffff80000000100an), 10);
 });
+
+
+test("address space enforces read-only and execute-only page permissions", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const mmu = new GuestAddressSpace(memory);
+  mmu.map(0x5000n, 0n, { read: false, execute: true });
+  assert.throws(() => mmu.read(0x5000n, 1), error => error instanceof PageFault && error.present);
+  assert.deepEqual([...mmu.fetch(0x5000n, 1)], [0]);
+  assert.throws(() => mmu.write(0x5000n, Uint8Array.of(1)), PageFault);
+});
