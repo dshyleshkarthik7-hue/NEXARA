@@ -618,6 +618,24 @@ export class X86Cpu {
         this.setRegister(1, ecx, 32);
         this.setRegister(2, edx, 32);
         void subleaf;
+      } else if (second === 0x20 || second === 0x22) {
+        const modrm = this.#fetch8();
+        if ((modrm >> 6) !== 3 || (rex & 4) !== 0) {
+          throw new CpuFault("MOV to/from control register requires register-direct encoding", start);
+        }
+        const control = (modrm >> 3) & 7;
+        const general = (modrm & 7) | ((rex & 1) ? 8 : 0);
+        this.#reg(general);
+        if (second === 0x20) this.setRegister(general, this.readControlRegister(control), this.mode);
+        else this.writeControlRegister(control, this.getRegister(general, this.mode));
+      } else if (second === 0x30) {
+        const index = Number(this.getRegister(1, 32));
+        const value = (this.getRegister(2, 32) << 32n) | this.getRegister(0, 32);
+        this.writeMsr(index, value);
+      } else if (second === 0x32) {
+        const value = this.readMsr(Number(this.getRegister(1, 32)));
+        this.setRegister(0, value & 0xffffffffn, 32);
+        this.setRegister(2, (value >> 32n) & 0xffffffffn, 32);
       } else if (second === 0x31) {
         const timestamp = BigInt(this.instructionsExecuted);
         this.setRegister(0, timestamp & 0xffffffffn, 32);
