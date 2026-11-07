@@ -20,7 +20,7 @@ export function normalizeWorkspacePath(value) {
   }
   const segments = path.split("/");
   if (segments.some(segment => !segment || segment === "." || segment === ".."
-    || segment.startsWith(".nexara") || /[\\u0000-\\u001f\\u007f]/.test(segment))) {
+    || segment.startsWith(".nexara") || /[\u0000-\u001f\u007f]/.test(segment))) {
     throw new TypeError("Invalid workspace path segment");
   }
   return segments.join("/");
