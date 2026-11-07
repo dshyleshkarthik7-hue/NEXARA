@@ -8,8 +8,11 @@ test("sandbox policy disables host networking, mounts, privileges and writable r
     assert.ok(args.includes(required), `missing ${required}`);
   }
   assert.equal(args.some(value => value.startsWith("/host") || value.includes("/var/run/docker.sock")), false);
-  assert.equal(sandboxCapabilities({ runtime: "runsc", imageConfigured: true }).isolated, true);
+  assert.equal(sandboxCapabilities({ runtime: "runsc", imageConfigured: true }).isolated, false);
+  assert.equal(sandboxCapabilities({ runtime: "runsc", imageConfigured: true }).sandboxed, true);
   assert.equal(sandboxCapabilities({ runtime: "runc", imageConfigured: true }).isolated, false);
+  assert.equal(sandboxCapabilities({ runtime: "kata", imageConfigured: true }).isolated, true);
+  assert.equal(sandboxCapabilities({ runtime: "kata", imageConfigured: true }).sharedHostKernel, false);
 });
 
 test("sandbox policy rejects invalid images, runtimes and resource limits", () => {
