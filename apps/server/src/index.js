@@ -10,6 +10,10 @@ import { SessionRegistry } from "./session-registry.js";
 const app = Fastify({ logger: true, bodyLimit: 16 * 1024 });
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || "127.0.0.1";
+const allowUnsandboxedHostPty = process.env.NEXARA_ALLOW_UNSANDBOXED_HOST_PTY === "true";
+if (allowUnsandboxedHostPty && !["127.0.0.1", "localhost", "::1"].includes(host)) {
+  throw new Error("Refusing to expose unsandboxed host PTY beyond loopback; deploy an isolated VM backend instead");
+}
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || "http://localhost:5173").split(",").map(s => s.trim()).filter(Boolean));
 const maxSessions = Math.max(1, Number.parseInt(process.env.NEXARA_MAX_SESSIONS || "4", 10) || 4);
 const registry = new SessionRegistry({
@@ -47,11 +51,12 @@ app.get("/health", async () => ({ name: "NEXARA", status: "ok", version: 1 }));
 app.get("/api/capabilities", async () => ({
   protocolVersion: 1,
   sessionSecurity: { perSessionSecret: true, originAllowlist: true, perClientQuota: true, creationRateLimit: true, idleTimeoutMs: registry.idleTimeoutMs },
-  backends: [{ id: "host-pty", label: "Host process terminal", available: true, machineEmulation: false }],
+  backends: [{ id: "host-pty", label: "Unsandboxed host process terminal", available: allowUnsandboxedHostPty, machineEmulation: false, isolated: false }],
   architectures: { x86: { supported: false }, x86_64: { supported: false } }
 }));
 
 app.post("/api/sessions", async (request, reply) => {
+  if (!allowUnsandboxedHostPty) return reply.code(503).send({ error: "Host PTY is disabled because it does not provide guest isolation. Configure a supported isolated execution backend." });
   if (!registry.canCreate(request.ip)) return reply.code(429).send({ error: "Session creation limit or capacity reached" });
   const shell = process.env.NEXARA_SHELL || process.env.SHELL || (process.platform === "win32" ? "powershell.exe" : "/bin/sh");
   const id = randomUUID();
