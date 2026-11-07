@@ -1,5 +1,5 @@
 import { IndexedDbWorkspaceStore } from "../../../packages/workspace/src/index.js";
-import { X86InterpreterBackend } from "../../../packages/x86-core/src/backend.js";
+import { X86InterpreterBackend, parseHexProgram } from "../../../packages/x86-core/src/backend.js";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8787";
 const editor = document.querySelector("#editor");
@@ -161,13 +161,7 @@ importInput.addEventListener("change", async () => {
 
 document.querySelector("#run-x86").addEventListener("click", async () => {
   try {
-    const tokens = editor.value.trim().split(/[\s,]+/).filter(Boolean);
-    if (!tokens.length) throw new Error("Enter hexadecimal instruction bytes in the editor first");
-    const bytes = Uint8Array.from(tokens.map(token => {
-      const hex = token.toLowerCase().startsWith("0x") ? token.slice(2) : token;
-      if (!/^[0-9a-fA-F]{2}$/.test(hex)) throw new Error(`Invalid byte: ${token}`);
-      return Number.parseInt(hex, 16);
-    }));
+    const bytes = parseHexProgram(editor.value);
     const mode = Number(document.querySelector("#x86-mode").value);
     const backend = new X86InterpreterBackend();
     const machine = await backend.createMachine({ mode, memoryPages: 4 });
