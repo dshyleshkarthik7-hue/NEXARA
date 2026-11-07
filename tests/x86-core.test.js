@@ -609,7 +609,7 @@ test("CPU owns protected-mode segment state and restores cached selectors", () =
   cpu.segments.installCodeSegment(0x08);
   cpu.segments.loadStack(0x10);
   cpu.segments.loadData("ds", 0x10);
-  const snapshot = cpu.snapshot();
+  const snapshot = cpu.saveState();
   assert.equal(snapshot.segments.cs.selector, 0x08);
   assert.equal(snapshot.segments.ss.selector, 0x10);
   const restored = cpuFor([0xf4], 32);
