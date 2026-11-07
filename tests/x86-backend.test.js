@@ -113,6 +113,9 @@ test("CR0 CR3 and CR4 validate paging prerequisites and reserved bits", async ()
   assert.equal(cpu.readControlRegister(0), 0x60000010n);
   assert.throws(() => cpu.writeControlRegister(0, 1n << 31n), /requires CR0.PE/i);
   assert.throws(() => cpu.writeControlRegister(4, 1n << 63n), /reserved bits/i);
+  assert.throws(() => cpu.writeControlRegister(4, 1n << 7n), /reserved bits/i);
+  const mode32 = await new X86InterpreterBackend().createMachine({ mode: 32, memoryPages: 2, virtualMemory: true });
+  assert.throws(() => mode32.cpu.writeControlRegister(0, 0x80000011n), /32-bit paging is not implemented/i);
   assert.throws(() => cpu.writeControlRegister(3, 1n), /aligned/i);
   cpu.writeControlRegister(4, 1n << 5n); // CR4.PAE
   cpu.writeControlRegister(0, 0xe0000011n); // CR0.PG | CD | NW | PE
