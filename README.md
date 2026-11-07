@@ -62,7 +62,7 @@ Compatibility and performance claims will be made only against reproducible conf
 
 ## Descriptor and interrupt-table groundwork
 
-`packages/x86-core/src/descriptors.js` provides bounded readers for legacy 8-byte GDT/LDT segment descriptors and 64-bit IDT gates. It decodes selector fields, descriptor attributes, segment base/limit, gate target offsets, IST, gate type, presence, and software-interrupt DPL checks. Table reads are checked against both the architectural table limit and guest physical memory bounds. This is a metadata/validation component only: it does not load GDTR/IDTR into CPU state, change CPL, load segment registers, switch stacks, push interrupt frames, or deliver exceptions/interrupts. Those operations remain future work and must not be inferred from descriptor decoding support.
+`packages/x86-core/src/descriptors.js` provides bounded readers for legacy 8-byte GDT/LDT segment descriptors and 64-bit IDT gates. It decodes selector fields, descriptor attributes, segment base/limit, gate target offsets, IST, gate type, presence, and software-interrupt DPL checks. Table reads are checked against both the architectural table limit and guest physical memory bounds. The CPU now owns GDTR/IDTR state and executes a limited subset of LGDT/LIDT, MOV Sreg, LLDT and LTR instructions. Descriptor decoding still does not imply complete privilege transitions, stack switching, interrupt frames or exception delivery.
 
 ## Security boundary
 
@@ -95,7 +95,7 @@ The repository contains an experimental, deliberately bounded instruction interp
 
 ## CPU-integrated segment-cache model
 
-The CPU now owns an `X86SegmentState` instance backed by its GDT view. Segment-cache state is included in CPU snapshots and is restored by re-reading selectors against the restored guest memory and GDTR. The current implementation supports descriptor-validated DS/ES/FS/GS loads, writable SS loads, and validated CS-cache installation for trusted control-transfer code. This is still not full protected-mode execution: instruction decoding for MOV Sreg and LGDT/LIDT/LLDT/LTR, CR0.PE transitions, far control transfers, call gates, ring transitions, stack switching, segment-based linear-address checks and interrupt/IRET delivery remain unimplemented.
+The CPU now owns an `X86SegmentState` instance backed by its GDT view. Segment-cache state is included in CPU snapshots and is restored by re-reading selectors against the restored guest memory and GDTR. The current implementation supports descriptor-validated DS/ES/FS/GS loads, writable SS loads, and validated CS-cache installation for trusted control-transfer code. This is still not full protected-mode execution: complete CR0.PE transition semantics, far CALL/RET, call gates, ring transitions, TSS stack switching, general segment-based linear-address checks and interrupt/IRET delivery remain unimplemented. A limited immediate far JMP path is implemented separately.
 
 
 ## Protected-mode instruction subset (experimental)
