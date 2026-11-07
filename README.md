@@ -63,3 +63,7 @@ The server defaults to loopback binding. Browser origins are allowlisted, and ea
 ## License
 
 No license has been selected yet. All rights reserved by default; do not assume this repository grants reuse rights.
+
+### x86 execution core status
+
+The repository now contains an experimental, deliberately bounded instruction interpreter in `packages/x86-core`. Its current tested subset includes NOP, HLT, selected register/immediate MOV operations, register-direct ADD/SUB/XOR, accumulator immediate arithmetic, and relative jumps in 32-bit and 64-bit modes. It uses the shared guest-memory primitive and an instruction budget. It does not yet implement general memory operands, segmentation, paging, privilege levels, interrupts, floating point/SIMD, system instructions, firmware, devices, or Linux boot. It must not be described as full x86 compatibility.
