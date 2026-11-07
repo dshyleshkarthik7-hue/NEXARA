@@ -46,7 +46,7 @@ await app.register(websocket);
 app.get("/health", async () => ({ name: "NEXARA", status: "ok", version: 1 }));
 app.get("/api/capabilities", async () => ({
   protocolVersion: 1,
-  sessionSecurity: { perSessionSecret: true, originAllowlist: true },
+  sessionSecurity: { perSessionSecret: true, originAllowlist: true, perClientQuota: true, creationRateLimit: true, idleTimeoutMs: registry.idleTimeoutMs },
   backends: [{ id: "host-pty", label: "Host process terminal", available: true, machineEmulation: false }],
   architectures: { x86: { supported: false }, x86_64: { supported: false } }
 }));
@@ -92,6 +92,7 @@ app.get("/api/sessions/:id/stream", { websocket: true }, (socket, request) => {
     return;
   }
   const { session } = entry;
+  session.onExit(() => socket.close(1001, "PTY process exited"));
   const onData = session.onData(data => {
     registry.touch(request.params.id);
     if (socket.readyState !== 1) return;
