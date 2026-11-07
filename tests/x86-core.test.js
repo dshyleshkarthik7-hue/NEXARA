@@ -108,3 +108,37 @@ test("failed push leaves stack pointer unchanged", () => {
   assert.throws(() => cpu.step(), RangeError);
   assert.equal(cpu.getRegister(4, 32), 2n);
 });
+
+test("LEA computes a base-plus-displacement effective address", () => {
+  const cpu = cpuFor([0x8d,0x48,0x04,0xf4], 32);
+  cpu.setRegister(0, 120n, 32);
+  cpu.run();
+  assert.equal(cpu.getRegister(1, 32), 124n);
+});
+
+test("C7 writes an immediate to guest memory", () => {
+  const cpu = cpuFor([0xc7,0x00,0x78,0x56,0x34,0x12,0xf4], 32);
+  cpu.setRegister(0, 256n, 32);
+  cpu.run();
+  assert.deepEqual([...cpu.memory.read(256, 4)], [0x78,0x56,0x34,0x12]);
+});
+
+test("group-1 immediate instructions support ADD SUB XOR and CMP", () => {
+  const cpu = cpuFor([
+    0xb8,10,0,0,0,
+    0x83,0xc0,5,
+    0x83,0xe8,3,
+    0x83,0xf0,6,
+    0x83,0xf8,8,
+    0x74,0x01,
+    0xf4,0xf4
+  ], 32);
+  cpu.run();
+  assert.equal(cpu.getRegister(0, 32), 8n);
+  assert.equal(cpu.halted, true);
+});
+
+test("unsupported group-1 extensions fault", () => {
+  const cpu = cpuFor([0x83,0xd0,0x01], 32);
+  assert.throws(() => cpu.step(), CpuFault);
+});
