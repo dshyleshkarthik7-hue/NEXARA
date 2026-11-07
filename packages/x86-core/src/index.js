@@ -284,6 +284,37 @@ export class X86Cpu {
         if (opcode === 0x31) this.#writeOperand(operand, result, width);
         else if (opcode === 0x33) this.setRegister(reg, result, width);
       }
+    } else if (opcode === 0xc1 || opcode === 0xd1 || opcode === 0xd3) {
+      const decoded = this.#decodeModRM(rex, addressWidth);
+      const extension = decoded.reg & 7;
+      if (![4, 5, 7].includes(extension)) throw new CpuFault("Unsupported shift extension", start);
+      let count = opcode === 0xc1 ? this.#fetch8() : opcode === 0xd1 ? 1 : Number(this.getRegister(1, 8));
+      count &= this.mode === 64 && width === 64 ? 0x3f : 0x1f;
+      if (count !== 0) {
+        const mask = this.#mask(width);
+        const original = this.#readOperand(decoded.operand, width) & mask;
+        const sign = 1n << BigInt(width - 1);
+        let result, carry = false;
+        if (extension === 4) {
+          carry = count <= width && ((original >> BigInt(width - count)) & 1n) !== 0n;
+          result = count >= width ? 0n : (original << BigInt(count)) & mask;
+        } else if (extension === 5) {
+          carry = count <= width && ((original >> BigInt(count - 1)) & 1n) !== 0n;
+          result = count >= width ? 0n : original >> BigInt(count);
+        } else {
+          carry = count <= width && ((original >> BigInt(count - 1)) & 1n) !== 0n;
+          const signed = (original & sign) !== 0n ? original - (1n << BigInt(width)) : original;
+          result = count >= width ? ((original & sign) !== 0n ? mask : 0n) : (signed >> BigInt(count)) & mask;
+        }
+        this.#setArithmeticFlags(result, 0n, 0n, width, "logic");
+        if (carry) this.flags |= CF;
+        if (count === 1) {
+          const overflow = extension === 4 ? (((result & sign) !== 0n) !== carry)
+            : extension === 5 ? ((original & sign) !== 0n) : false;
+          if (overflow) this.flags |= OF;
+        }
+        this.#writeOperand(decoded.operand, result, width);
+      }
     } else if (opcode === 0x8d) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       if (decoded.operand.kind !== "memory") throw new CpuFault("LEA requires a memory addressing form", start);
