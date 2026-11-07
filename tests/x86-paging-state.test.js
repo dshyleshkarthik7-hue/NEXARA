@@ -16,7 +16,8 @@ test("CPU snapshots preserve the attached legacy paging backend", () => {
   const paging = new X86LegacyPaging32(memory, { pse: true, writeProtect: true });
   const cpu = new X86Cpu({ memory, mode: 32, legacyPaging32: paging });
   cpu.writeControlRegister(3, 0n);
-  cpu.writeControlRegister(0, 0x80010011n);
+  cpu.writeControlRegister(4, 0x10n); // CR4.PSE
+  cpu.writeControlRegister(0, 0x80010011n); // CR0.PG | WP | PE | ET
   cpu.step();
   const state = cpu.saveState();
   assert.equal(state.legacyPaging32.format, "nexara-legacy-paging32-v1");
