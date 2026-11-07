@@ -13,7 +13,7 @@ NEXARA combines a lightweight editor, browser terminal client, server session ga
 - Reduced environment inheritance for spawned shells.
 - PTY session registry with per-client active-session quotas, session-creation rate limits, constant-time per-session credential checks, idle expiry, and shutdown cleanup.
 - Shared client/server protocol and a bounds-checked guest-memory primitive with snapshots.
-- Experimental x86 interpreter with a limited 32/64-bit integer instruction subset, conservative CPUID feature/vendor reporting, deterministic RDTSC, bounded execution, and validated CPU-plus-memory save-state restoration.
+- Experimental x86 interpreter with a limited 32/64-bit integer instruction subset, including common shifts and signed IMUL, conservative CPUID feature/vendor reporting, deterministic RDTSC, bounded execution, and validated CPU-plus-memory save-state restoration.
 - Automated protocol, memory-boundary, CPU-subset, save-state, and workspace-storage tests.
 
 ## Requirements and run
