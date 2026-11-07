@@ -47,6 +47,15 @@ export class X86Cpu {
     this.segments = new X86SegmentState({ gdt: this.gdt, cpl: 0, longMode: mode === 64 });
   }
 
+  #syncDescriptorTables() {
+    this.gdt.setRegister(this.systemTables.gdtr.base, this.systemTables.gdtr.limit);
+    this.idt.setRegister(this.systemTables.idtr.base, this.systemTables.idtr.limit);
+    const ldtr = this.systemTables.ldtr;
+    this.segments.ldt = ldtr.usable && ldtr.present
+      ? new X86DescriptorTable(this.memory, { base: ldtr.base, limit: ldtr.limit, kind: "ldt", longMode: this.mode === 64 })
+      : null;
+  }
+
   readControlRegister(index) {
     if (![0, 3, 4].includes(index)) throw new CpuFault("Unsupported control register", this.ip);
     return this.controlRegisters.get(index);
@@ -681,7 +690,7 @@ export class X86Cpu {
         }
         const selector = Number(this.#readOperand(decoded.operand, 16));
         if (selector === 0) {
-          if (extension === 2) this.systemTables.clearLdtr();
+          if (extension === 2) { this.systemTables.clearLdtr(); this.segments.ldt = null; }
           else throw new CpuFault("LTR selector cannot be null", start);
         } else {
           if (this.mode === 64) throw new CpuFault("64-bit system-descriptor execution is not yet supported", start);
@@ -697,6 +706,7 @@ export class X86Cpu {
             if (extension === 2) {
               if (type !== 2) throw new Error("LLDT requires an LDT system descriptor");
               this.systemTables.loadLdtr({ selector, base, limit: Number(limit), present: true, usable: true });
+              this.segments.ldt = new X86DescriptorTable(this.memory, { base, limit: Number(limit), kind: "ldt", longMode: false });
             } else {
               if (type !== 9) throw new Error("LTR requires an available 32-bit TSS descriptor");
               this.systemTables.loadTaskRegister({ selector, base, limit: Number(limit), present: true, busy: true, usable: true });
@@ -857,7 +867,7 @@ export class X86Cpu {
     this.controlRegisters = new Map(["0","3","4"].map(key => [Number(key), BigInt(state.controlRegisters[key])]));
     this.efer = BigInt(state.efer);
     this.systemTables.restore(state.systemTables);
-    this.gdt.setRegister(BigInt(state.systemTables.gdtr.base), state.systemTables.gdtr.limit);
+    this.#syncDescriptorTables();
     this.segments.restore(state.segments);
     this.#syncPagingState();
   }
