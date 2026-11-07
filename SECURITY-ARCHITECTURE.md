@@ -47,7 +47,7 @@ These are engineering differentiators to validate, not claims that no competitor
 
 The current server starts node-pty shells as the server process user. That is not a VM and is not safe for hostile multi-tenant workloads. The server now fails closed by disabling this unsandboxed PTY endpoint unless NEXARA_ALLOW_UNSANDBOXED_HOST_PTY=true is explicitly set. Enabling it is restricted to loopback binds. It is intended only for trusted local development and must not be used as a substitute for isolation.
 
-The x86 interpreter is experimental and incomplete. No microVM supervisor, hardware virtualization backend, authenticated capability lease service, virtual device broker, firmware implementation, bootable guest image pipeline or Linux shell has been completed by this document.
+The x86 interpreter is experimental and incomplete. A signed capability-lease primitive exists in packages/security, but it is not yet enforced by a supervisor. No microVM supervisor, hardware virtualization backend, virtual device broker, firmware implementation, bootable guest image pipeline or Linux shell has been completed.
 
 ## Acceptance gates before public/untrusted use
 
