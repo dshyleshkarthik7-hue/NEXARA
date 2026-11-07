@@ -1,5 +1,5 @@
 import { GuestMemory } from "../../runtime/src/index.js";
-import { X86LegacyPaging32 } from "../../runtime/src/mmu.js";
+import { X86LegacyPaging32, PageFault } from "../../runtime/src/mmu.js";
 import { X86SystemTableState } from "./system-tables.js";
 import { X86DescriptorTable } from "./descriptors.js";
 import { X86SegmentState } from "./segments.js";
@@ -43,7 +43,7 @@ export class X86Cpu {
     this.flags = 2n;
     this.halted = false;
     this.instructionsExecuted = 0;
-    this.controlRegisters = new Map([[0, 0x60000010n], [3, 0n], [4, 0n]]);
+    this.controlRegisters = new Map([[0, 0x60000010n], [2, 0n], [3, 0n], [4, 0n]]);
     this.efer = 0n;
     this.systemTables = new X86SystemTableState(memory, { longMode: mode === 64 });
     this.gdt = new X86DescriptorTable(memory, { base: 0n, limit: Math.min(0xffff, memory.byteLength - 1), kind: "gdt", longMode: mode === 64 });
@@ -61,7 +61,7 @@ export class X86Cpu {
   }
 
   readControlRegister(index) {
-    if (![0, 3, 4].includes(index)) throw new CpuFault("Unsupported control register", this.ip);
+    if (![0, 2, 3, 4].includes(index)) throw new CpuFault("Unsupported control register", this.ip);
     return this.controlRegisters.get(index);
   }
 
@@ -98,6 +98,8 @@ export class X86Cpu {
       if ((next & (1n << 31n)) !== 0n && (next & 1n) === 0n) {
         throw new CpuFault("CR0.PG requires CR0.PE", this.ip);
       }
+    } else if (index === 2) {
+      if (next > 0xffffffffn) throw new CpuFault("CR2 exceeds 32-bit linear address range", this.ip);
     } else if (index === 3) {
       if ((next & 0xfffn) !== 0n) throw new CpuFault("CR3 must be 4 KiB aligned", this.ip);
       if (next >= BigInt(this.memory.byteLength)) throw new CpuFault("CR3 exceeds guest physical memory", this.ip);
@@ -166,7 +168,7 @@ export class X86Cpu {
     if (code && this.mode !== 64 && BigInt(address) > code.limit) throw new CpuFault("Instruction fetch exceeds CS limit", address);
     const linear = BigInt(address) + (this.mode === 64 ? 0n : (code?.base ?? 0n));
     if (linear > BigInt(Number.MAX_SAFE_INTEGER)) throw new CpuFault("Instruction linear address exceeds host safe integer range", address);
-    return this.addressSpace ? this.addressSpace.fetch(linear, 1)[0] : this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n ? this.legacyPaging32.read(linear, 1, { execute: true, user: this.segments.cpl === 3 })[0] : this.memory.read(Number(linear), 1)[0];
+    return this.#readLinear(linear, 1, { execute: true })[0];
   }
   #fetchUnsigned(bytes) {
     let value = 0n;
@@ -238,10 +240,37 @@ export class X86Cpu {
     return { reg, operand: { kind: "memory", address } };
   }
 
+  #readLinear(address, length, { execute = false } = {}) {
+    try {
+      if (this.addressSpace) return execute
+        ? this.addressSpace.fetch(BigInt(address), length)
+        : this.addressSpace.read(BigInt(address), length);
+      if (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n) {
+        return this.legacyPaging32.read(address, length, { execute, user: this.segments.cpl === 3 });
+      }
+      return this.memory.read(Number(address), length);
+    } catch (error) {
+      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & 0xffffffffn);
+      throw error;
+    }
+  }
+
+  #writeLinear(address, data) {
+    try {
+      if (this.addressSpace) this.addressSpace.write(BigInt(address), data);
+      else if (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n) {
+        this.legacyPaging32.write(address, data, { user: this.segments.cpl === 3 });
+      } else this.memory.write(Number(address), data);
+    } catch (error) {
+      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & 0xffffffffn);
+      throw error;
+    }
+  }
+
   #readOperand(operand, width) {
     if (operand.kind === "register") return this.getRegister(operand.index, width);
     const bytes = width / 8;
-    const data = this.addressSpace ? this.addressSpace.read(BigInt(operand.address), bytes) : this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n ? this.legacyPaging32.read(operand.address, bytes, { user: this.segments.cpl === 3 }) : this.memory.read(operand.address, bytes);
+    const data = this.#readLinear(operand.address, bytes);
     let value = 0n;
     for (let i = 0; i < bytes; i++) value |= BigInt(data[i]) << BigInt(i * 8);
     return value;
@@ -253,9 +282,7 @@ export class X86Cpu {
     const v = BigInt(value) & this.#mask(width);
     const data = new Uint8Array(bytes);
     for (let i = 0; i < bytes; i++) data[i] = Number((v >> BigInt(i * 8)) & 0xffn);
-    if (this.addressSpace) this.addressSpace.write(BigInt(operand.address), data);
-    else if (this.legacyPaging32 && (this.controlRegisters.get(0) & (1n << 31n)) !== 0n) this.legacyPaging32.write(operand.address, data, { user: this.segments.cpl === 3 });
-    else this.memory.write(operand.address, data);
+    this.#writeLinear(operand.address, data);
   }
 
   #setArithmeticFlags(result, a, b, width, operation) {
@@ -789,6 +816,7 @@ export class X86Cpu {
           throw new CpuFault("MOV to/from control register requires register-direct encoding", start);
         }
         const control = (modrm >> 3) & 7;
+        if (this.segments.cpl !== 0) throw new CpuFault("MOV CR requires CPL 0", start);
         const general = (modrm & 7) | ((rex & 1) ? 8 : 0);
         this.#reg(general);
         if (second === 0x20) this.setRegister(general, this.readControlRegister(control), this.mode);
@@ -849,7 +877,7 @@ export class X86Cpu {
       || typeof state.flags !== "string" || !/^\d+$/.test(state.flags)
       || typeof state.halted !== "boolean"
       || !Number.isSafeInteger(state.instructionsExecuted) || state.instructionsExecuted < 0
-      || !state.controlRegisters || !["0","3","4"].every(key => typeof state.controlRegisters[key] === "string" && /^\d+$/.test(state.controlRegisters[key]))
+      || !state.controlRegisters || !["0","2","3","4"].every(key => typeof state.controlRegisters[key] === "string" && /^\d+$/.test(state.controlRegisters[key]))
       || typeof state.efer !== "string" || !/^\d+$/.test(state.efer)
       || !state.systemTables || state.systemTables.format !== "nexara-x86-system-tables-v1"
       || !state.segments || state.segments.format !== "nexara-x86-segments-v1"
@@ -879,7 +907,7 @@ export class X86Cpu {
     this.flags = flags;
     this.halted = state.halted;
     this.instructionsExecuted = state.instructionsExecuted;
-    this.controlRegisters = new Map(["0","3","4"].map(key => [Number(key), BigInt(state.controlRegisters[key])]));
+    this.controlRegisters = new Map(["0","2","3","4"].map(key => [Number(key), BigInt(state.controlRegisters[key])]));
     this.efer = BigInt(state.efer);
     this.systemTables.restore(state.systemTables);
     this.#syncDescriptorTables();
