@@ -387,9 +387,9 @@ export class X86Cpu {
       const value = this.#readOperand(decoded.operand, [2, 4, 6].includes(extension) ? controlWidth : arithmeticWidth);
       if (extension === 0 || extension === 1) {
         const carry = this.flags & CF;
-        const result = this.#alu(extension === 0 ? "add" : "sub", value, 1n, operandWidth);
+        const result = this.#alu(extension === 0 ? "add" : "sub", value, 1n, arithmeticWidth);
         this.flags = (this.flags & ~CF) | carry;
-        this.#writeOperand(decoded.operand, result, operandWidth);
+        this.#writeOperand(decoded.operand, result, arithmeticWidth);
       } else if (extension === 2 || extension === 4) {
         const target = value & this.#mask(this.mode);
         if (target >= BigInt(this.memory.byteLength)) throw new CpuFault("Indirect branch target outside memory", start);
