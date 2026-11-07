@@ -242,3 +242,38 @@ test("RDTSC returns the deterministic instruction counter", () => {
   assert.equal(cpu.getRegister(0, 32), 1n);
   assert.equal(cpu.getRegister(2, 32), 0n);
 });
+
+
+test("supports immediate SHL and updates carry, overflow and sign flags", () => {
+  const cpu = cpuFor([0xc1,0xe0,0x01,0xf4], 32);
+  cpu.setRegister(0, 0x40000000n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(0,32), 0x80000000n);
+  const flags = BigInt(cpu.saveState().flags);
+  assert.equal((flags & (1n << 11n)) !== 0n, true);
+  assert.equal((flags & (1n << 7n)) !== 0n, true);
+});
+
+test("supports one-bit SHR and SAR with arithmetic sign extension", () => {
+  const shr = cpuFor([0xd1,0xe8], 32);
+  shr.setRegister(0, 0x80000001n, 32);
+  shr.step();
+  assert.equal(shr.getRegister(0,32), 0x40000000n);
+  assert.equal((BigInt(shr.saveState().flags) & (1n << 0n)) !== 0n, true);
+
+  const sar = cpuFor([0xd1,0xf8], 32);
+  sar.setRegister(0, 0x80000000n, 32);
+  sar.step();
+  assert.equal(sar.getRegister(0,32), 0xc0000000n);
+});
+
+test("supports 64-bit immediate shifts and treats a zero count as a no-op", () => {
+  const cpu = cpuFor([0x48,0xc1,0xe0,0x01,0xc1,0xe0,0x00], 64);
+  cpu.setRegister(0, 0x4000000000000000n, 64);
+  cpu.step();
+  assert.equal(cpu.getRegister(0,64), 0x8000000000000000n);
+  const flags = cpu.saveState().flags;
+  cpu.step();
+  assert.equal(cpu.getRegister(0,64), 0x8000000000000000n);
+  assert.equal(cpu.saveState().flags, flags);
+});
