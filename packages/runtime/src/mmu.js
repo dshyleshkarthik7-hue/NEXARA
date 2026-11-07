@@ -136,24 +136,32 @@ export class GuestAddressSpace {
       effectiveWrite &&= (entry & 2n) !== 0n;
       effectiveUser &&= (entry & 4n) !== 0n;
       effectiveExecute &&= (entry & (1n << 63n)) === 0n;
-      if (level < 3) {
-        if ((entry & (1n << 7n)) !== 0n) {
-          throw new PageFault(virtual, { present: true, write, user, instruction: execute });
-        }
+      const pageSize = level === 1 ? (1n << 30n) : level === 2 ? (1n << 21n) : PAGE_MASK + 1n;
+      const largePage = (level === 1 || level === 2) && (entry & (1n << 7n)) !== 0n;
+      if (level === 0 && (entry & (1n << 7n)) !== 0n) {
+        throw new PageFault(virtual, { present: true, write, user, instruction: execute });
+      }
+      if (level < 3 && !largePage) {
         table = entry & 0x0000fffffffff000n;
         if (table + PAGE_MASK >= BigInt(this.memory.byteLength)) {
           throw new PageFault(virtual, { present: true, write, user, instruction: execute });
         }
-      } else {
-        const allowed = (!write || effectiveWrite) && (!user || effectiveUser)
-          && (!execute || effectiveExecute);
-        if (!allowed) throw new PageFault(virtual, { present: true, write, user, instruction: execute });
-        const physical = (entry & 0x0000fffffffff000n) | (virtual & PAGE_MASK);
-        if (physical >= BigInt(this.memory.byteLength)) {
-          throw new PageFault(virtual, { present: true, write, user, instruction: execute });
-        }
-        return Number(physical);
+        continue;
       }
+      const allowed = (!write || effectiveWrite) && (!user || effectiveUser)
+        && (!execute || effectiveExecute);
+      if (!allowed) throw new PageFault(virtual, { present: true, write, user, instruction: execute });
+      const alignmentMask = pageSize - 1n;
+      const addressField = entry & 0x0000fffffffff000n;
+      if ((addressField & alignmentMask) !== 0n) {
+        throw new PageFault(virtual, { present: true, write, user, instruction: execute });
+      }
+      const physicalBase = addressField & ~alignmentMask;
+      const physical = physicalBase | (virtual & alignmentMask);
+      if (physical >= BigInt(this.memory.byteLength)) {
+        throw new PageFault(virtual, { present: true, write, user, instruction: execute });
+      }
+      return Number(physical);
     }
     throw new PageFault(virtual);
   }
