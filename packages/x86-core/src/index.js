@@ -25,7 +25,7 @@ export class CpuFault extends Error {
  * Includes a bounded protected-mode ring-transition subset; not a complete x86 implementation.
  */
 export class X86Cpu {
-  constructor({ memory, mode = 64, instructionPointer = 0, addressSpace = null, legacyPaging32 = null, ioBus = null } = {}) {
+  constructor({ memory, mode = 64, instructionPointer = 0, addressSpace = null, legacyPaging32 = null, ioBus = null, exceptionDelivery = false } = {}) {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
     if (mode !== 32 && mode !== 64) throw new RangeError("mode must be 32 or 64");
     if (!Number.isSafeInteger(instructionPointer) || instructionPointer < 0
@@ -41,6 +41,7 @@ export class X86Cpu {
     this.legacyPaging32 = legacyPaging32;
     if (ioBus !== null && (!ioBus || typeof ioBus.read !== "function" || typeof ioBus.write !== "function")) throw new TypeError("ioBus must implement read(port, width) and write(port, value, width)");
     this.ioBus = ioBus;
+    this.exceptionDelivery = Boolean(exceptionDelivery);
     this.mode = mode;
     this.ip = instructionPointer;
     this.registers = Array.from({ length: 16 }, () => 0n);
@@ -688,6 +689,26 @@ export class X86Cpu {
   }
 
   step() {
+    const faultingIp = this.ip;
+    try {
+      return this.#executeStep();
+    } catch (error) {
+      if (!(error instanceof PageFault) || !this.exceptionDelivery) throw error;
+      try {
+        this.deliverException(14, { errorCode: error.errorCode, returnIp: faultingIp });
+        return Object.freeze({ state: "exception", vector: 14, errorCode: error.errorCode, ip: this.ip });
+      } catch (pageFaultDeliveryError) {
+        try {
+          this.deliverException(8, { errorCode: 0, returnIp: faultingIp });
+          return Object.freeze({ state: "exception", vector: 8, errorCode: 0, ip: this.ip });
+        } catch (doubleFaultDeliveryError) {
+          throw new CpuFault("Triple fault: page-fault and double-fault delivery both failed", faultingIp);
+        }
+      }
+    }
+  }
+
+  #executeStep() {
     if (this.halted && this.pendingInterrupts.length && (this.flags & (1n << 9n)) !== 0n) this.halted = false;
     if (this.halted) return { state: "halted", ip: this.ip };
     const start = this.ip;
