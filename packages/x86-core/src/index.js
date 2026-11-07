@@ -319,6 +319,32 @@ export class X86Cpu {
       const decoded = this.#decodeModRM(rex, addressWidth);
       if (decoded.operand.kind !== "memory") throw new CpuFault("LEA requires a memory addressing form", start);
       this.setRegister(decoded.reg, BigInt(decoded.operand.address), width);
+    } else if (opcode === 0xf7) {
+      const decoded = this.#decodeModRM(rex, addressWidth);
+      const extension = decoded.reg & 7;
+      if (![2, 3, 4, 5].includes(extension)) throw new CpuFault("Unsupported F7 integer extension", start);
+      const operand = this.#readOperand(decoded.operand, width) & this.#mask(width);
+      const mask = this.#mask(width);
+      const signBit = 1n << BigInt(width - 1);
+      const signed = value => (value & signBit) !== 0n ? value - (1n << BigInt(width)) : value;
+      if (extension === 2) {
+        this.#writeOperand(decoded.operand, ~operand & mask, width);
+      } else if (extension === 3) {
+        const result = this.#alu("sub", 0n, operand, width);
+        this.#writeOperand(decoded.operand, result, width);
+      } else {
+        const accumulator = this.getRegister(0, width);
+        const product = extension === 4 ? accumulator * operand : signed(accumulator) * signed(operand);
+        const low = product & mask;
+        const high = (product >> BigInt(width)) & mask;
+        this.setRegister(0, low, width);
+        this.setRegister(2, high, width);
+        const overflow = extension === 4
+          ? high !== 0n
+          : signed(low) !== product;
+        this.flags &= ~(CF | OF);
+        if (overflow) this.flags |= CF | OF;
+      }
     } else if (opcode === 0xc7) {
       const decoded = this.#decodeModRM(rex, addressWidth);
       if (((decoded.reg & 7) !== 0)) throw new CpuFault("Unsupported C7 extension", start);
