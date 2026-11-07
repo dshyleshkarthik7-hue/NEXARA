@@ -142,3 +142,30 @@ test("unsupported group-1 extensions fault", () => {
   const cpu = cpuFor([0x83,0xd0,0x01], 32);
   assert.throws(() => cpu.step(), CpuFault);
 });
+
+test("register AND OR and TEST update values and zero flag", () => {
+  const cpu = cpuFor([
+    0xb8,0x0f,0,0,0, // eax=15
+    0xbb,0x03,0,0,0, // ebx=3
+    0x21,0xd8,       // and eax,ebx -> 3
+    0x09,0xd8,       // or eax,ebx -> 3
+    0x85,0xd8,       // test eax,ebx -> 3, flags only
+    0x3d,0x03,0,0,0, // cmp eax,3
+    0x74,0x01,
+    0xf4,0xf4
+  ], 32);
+  cpu.run();
+  assert.equal(cpu.getRegister(0, 32), 3n);
+  assert.equal(cpu.halted, true);
+});
+
+test("accumulator AND and OR immediate operations execute", () => {
+  const cpu = cpuFor([
+    0xb8,0x0f,0,0,0,
+    0x25,0x06,0,0,0,
+    0x0d,0x08,0,0,0,
+    0xf4
+  ], 32);
+  cpu.run();
+  assert.equal(cpu.getRegister(0, 32), 0x0en);
+});
