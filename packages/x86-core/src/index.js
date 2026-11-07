@@ -501,7 +501,7 @@ export class X86Cpu {
       }
       const targetCpl = target.dpl;
       const plan = this.segments.prepareCodeTransition(gate.selector, { targetCpl, allowInward: true });
-      if (gate.offset > 0x00007fffffffffff n || gate.offset > BigInt(Number.MAX_SAFE_INTEGER)) {
+      if (gate.offset > 0x00007fffffffffffn || gate.offset > BigInt(Number.MAX_SAFE_INTEGER)) {
         throw new Error("Long-mode interrupt target is not representable by this interpreter");
       }
       const oldCs = this.segments.registers.cs.selector;
