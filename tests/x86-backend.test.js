@@ -142,6 +142,7 @@ test("control registers and EFER survive save-state restore", async () => {
   machine.cpu.writeControlRegister(0, 0xe0000011n);
   machine.cpu.writeMsr(0xc0000080, (1n << 8n) | (1n << 11n));
   const state = machine.saveState();
+  machine.cpu.writeControlRegister(0, 0x60000011n); // leave paging before clearing LME
   machine.cpu.writeMsr(0xc0000080, 0n);
   machine.cpu.writeControlRegister(0, 0x60000010n);
   machine.loadState(state);
