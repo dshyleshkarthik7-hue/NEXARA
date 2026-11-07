@@ -100,6 +100,9 @@ export class X86Cpu {
     const allowed = 0x901n; // SCE, LME and NXE; LMA is read-only
     if ((next & ~allowed) !== 0n) throw new CpuFault("EFER contains reserved or read-only bits", this.ip);
     const previous = this.efer;
+    if ((previous & (1n << 10n)) !== 0n && (next & (1n << 8n)) === 0n) {
+      throw new CpuFault("Cannot clear EFER.LME while long mode is active", this.ip);
+    }
     this.efer = next | (previous & (1n << 10n));
     try { this.#syncPagingState(); }
     catch (error) { this.efer = previous; this.#syncPagingState(); throw error; }
