@@ -629,8 +629,8 @@ export class X86Cpu {
       } else if (second === 0x00) {
         const decoded = this.#decodeModRM(rex, addressWidth);
         const extension = decoded.reg & 7;
-        if (decoded.operand.kind !== "memory" || (decoded.reg & 8) !== 0 || (extension !== 2 && extension !== 3)) {
-          throw new CpuFault("LLDT/LTR require a memory selector operand", start);
+        if ((decoded.reg & 8) !== 0 || (extension !== 2 && extension !== 3)) {
+          throw new CpuFault("Invalid LLDT/LTR opcode extension", start);
         }
         if ((this.controlRegisters.get(0) & 1n) === 0n || this.segments.cpl !== 0) {
           throw new CpuFault("LLDT/LTR require protected mode at CPL 0", start);
