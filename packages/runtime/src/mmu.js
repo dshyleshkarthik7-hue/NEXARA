@@ -291,6 +291,32 @@ export class X86LegacyPaging32 {
   get cr3() { return this.#cr3; }
   flush() { this.#tlb.clear(); }
 
+  snapshot() {
+    return {
+      format: "nexara-legacy-paging32-v1",
+      cr3: this.#cr3 === null ? null : this.#cr3.toString(),
+      pse: this.pse,
+      writeProtect: this.writeProtect
+    };
+  }
+
+  restore(state) {
+    if (!state || state.format !== "nexara-legacy-paging32-v1"
+      || (state.cr3 !== null && (typeof state.cr3 !== "string" || !/^\\d+$/.test(state.cr3)))
+      || typeof state.pse !== "boolean" || typeof state.writeProtect !== "boolean") {
+      throw new TypeError("Invalid legacy paging state");
+    }
+    const cr3 = state.cr3 === null ? null : BigInt(state.cr3);
+    if (cr3 !== null && (cr3 > 0xfffff000n || (cr3 & 0xfffn) !== 0n
+      || cr3 + 4096n > BigInt(this.memory.byteLength))) {
+      throw new RangeError("Legacy paging state contains an invalid CR3");
+    }
+    this.pse = state.pse;
+    this.writeProtect = state.writeProtect;
+    this.#cr3 = cr3;
+    this.flush();
+  }
+
   #read32(address) {
     if (address < 0n || address + 4n > BigInt(this.memory.byteLength)) {
       throw new PageFault(0n, { present: true, reserved: true });
