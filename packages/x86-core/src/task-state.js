@@ -101,3 +101,98 @@ export class X86Tss32 {
       ringStacks: [0, 1, 2].map(ring => this.getRingStack(ring)), ioMapBase: this.ioMapBase });
   }
 }
+
+
+/**
+ * Bounds-checked 64-bit TSS view. RSP0-2 and IST1-7 are 64-bit stack
+ * pointers; the long-mode TSS has no ring stack selectors in these fields.
+ * This models architectural TSS memory only; it does not imply CPU delivery.
+ */
+export class X86Tss64 {
+  constructor(memory, { base = 0n, limit = 0x67 } = {}) {
+    if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
+    this.memory = memory;
+    this.setRegion(base, limit);
+  }
+
+  setRegion(base, limit) {
+    let address;
+    try { address = BigInt(base); } catch { throw new TypeError("TSS base must be an integer"); }
+    if (address < 0n || address > U64_MASK) throw new RangeError("64-bit TSS base is outside the 64-bit range");
+    if (!Number.isInteger(limit) || limit < 0x67 || limit > 0xffff) {
+      throw new RangeError("64-bit TSS limit must cover the fixed 104-byte header");
+    }
+    if (address + BigInt(limit) >= BigInt(this.memory.byteLength)) {
+      throw new RangeError("TSS region exceeds guest physical memory");
+    }
+    this.base = address;
+    this.limit = limit;
+  }
+
+  #address(offset, length) {
+    if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(length) || length < 1
+      || offset + length - 1 > this.limit) throw new RangeError("TSS access exceeds descriptor limit");
+    const address = this.base + BigInt(offset);
+    if (address + BigInt(length) > BigInt(this.memory.byteLength)) throw new RangeError("TSS access exceeds guest memory");
+    return Number(address);
+  }
+
+  #read64(offset) {
+    const bytes = this.memory.read(this.#address(offset, 8), 8);
+    let value = 0n;
+    for (let i = 0; i < 8; i++) value |= BigInt(bytes[i]) << BigInt(i * 8);
+    return value;
+  }
+
+  #write64(offset, value) {
+    let next;
+    try { next = BigInt(value); } catch { throw new TypeError("TSS stack pointer must be an integer"); }
+    if (next < 0n || next > U64_MASK) throw new RangeError("TSS stack pointer must be unsigned 64-bit");
+    const bytes = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) bytes[i] = Number((next >> BigInt(i * 8)) & 0xffn);
+    this.memory.write(this.#address(offset, 8), bytes);
+  }
+
+  getRsp(ring) {
+    if (!Number.isInteger(ring) || ring < 0 || ring > 2) throw new RangeError("TSS RSP ring must be 0, 1, or 2");
+    return this.#read64(4 + ring * 8);
+  }
+
+  setRsp(ring, value) {
+    if (!Number.isInteger(ring) || ring < 0 || ring > 2) throw new RangeError("TSS RSP ring must be 0, 1, or 2");
+    this.#write64(4 + ring * 8, value);
+    return this.getRsp(ring);
+  }
+
+  getIst(index) {
+    if (!Number.isInteger(index) || index < 1 || index > 7) throw new RangeError("IST index must be 1..7");
+    return this.#read64(36 + (index - 1) * 8);
+  }
+
+  setIst(index, value) {
+    if (!Number.isInteger(index) || index < 1 || index > 7) throw new RangeError("IST index must be 1..7");
+    this.#write64(36 + (index - 1) * 8, value);
+    return this.getIst(index);
+  }
+
+  get ioMapBase() {
+    const bytes = this.memory.read(this.#address(102, 2), 2);
+    return bytes[0] | (bytes[1] << 8);
+  }
+
+  set ioMapBase(value) {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffff) throw new RangeError("I/O map base must be 16-bit");
+    this.memory.write(this.#address(102, 2), Uint8Array.of(value & 255, value >>> 8));
+  }
+
+  snapshot() {
+    return Object.freeze({
+      format: "nexara-x86-tss64-v1",
+      base: this.base.toString(),
+      limit: this.limit,
+      rsp: [0, 1, 2].map(ring => this.getRsp(ring).toString()),
+      ist: [1, 2, 3, 4, 5, 6, 7].map(index => this.getIst(index).toString()),
+      ioMapBase: this.ioMapBase
+    });
+  }
+}
