@@ -394,7 +394,6 @@ export class X86Cpu {
   }
 
   #writeIo(port, value, width, start) {
-    this.#checkIoPermission(start);
     if (![8, 16, 32].includes(width)) throw new CpuFault("Unsupported I/O operand width", start);
     if (!Number.isInteger(port) || port < 0 || port > 0xffff || port + width / 8 > 0x10000) throw new CpuFault("I/O port range overflow", start);
     this.#checkIoPermission(start, port, width);
