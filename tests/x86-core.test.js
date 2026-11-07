@@ -579,3 +579,24 @@ test("FF group honors operand-size override for INC and PUSH", () => {
   assert.equal(push.getRegister(4,64), 510n);
   assert.deepEqual([...push.memory.read(510,2)], [0x34,0x12]);
 });
+
+
+test("F6 and F7 TEST immediate update flags without modifying operands", () => {
+  const byte = cpuFor([0xf6,0xc3,0x0f], 32);
+  byte.setRegister(3, 0xf0n, 8);
+  byte.step();
+  assert.equal(byte.getRegister(3,8), 0xf0n);
+  assert.equal((byte.flags & (1n << 6n)), 0n);
+
+  const dword = cpuFor([0xf7,0xc3,0x0f,0x00,0x00,0x00], 32);
+  dword.setRegister(3, 0x10n, 32);
+  dword.step();
+  assert.equal(dword.getRegister(3,32), 0x10n);
+  assert.equal((dword.flags & (1n << 6n)), 0n);
+
+  const qword = cpuFor([0x48,0xf7,0xc3,0x00,0x00,0x00,0x80], 64);
+  qword.setRegister(3, 0xffffffff80000000n, 64);
+  qword.step();
+  assert.equal(qword.getRegister(3,64), 0xffffffff80000000n);
+  assert.equal((qword.flags & (1n << 6n)), 0n);
+});
