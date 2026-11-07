@@ -214,6 +214,6 @@ test("guest control-register instructions reject memory forms and unsupported re
   assert.throws(() => memoryForm.step(), /register-direct/i);
 
   const unsupported = await new X86InterpreterBackend().createMachine({ mode: 64, memoryPages: 1 });
-  unsupported.loadProgram(Uint8Array.from([0x0f,0x20,0xd0])); // CR2
+  unsupported.loadProgram(Uint8Array.from([0x0f,0x20,0xc8])); // CR1 is reserved/unsupported
   assert.throws(() => unsupported.step(), /unsupported control register/i);
 });
