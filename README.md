@@ -6,13 +6,14 @@ NEXARA combines a lightweight editor, browser terminal client, server session ga
 
 ## Current implementation
 
-- Browser workspace with a lightweight editor and terminal client.
+- Browser workspace with a lightweight editor, file navigation, and terminal client.
+- IndexedDB-backed browser file storage with bounded text files, normalized paths, per-file revisions, and stale-write conflict detection.
 - Server-side PTY sessions over WebSocket.
 - Per-session random credentials, constant-time credential comparison, WebSocket origin allowlisting, bounded input, and a configurable session ceiling.
 - Reduced environment inheritance for spawned shells.
 - Shared client/server protocol and a bounds-checked guest-memory primitive with snapshots.
 - Experimental x86 interpreter with a limited 32/64-bit integer instruction subset, bounded execution, and validated CPU-plus-memory save-state restoration.
-- Automated protocol and memory-boundary tests.
+- Automated protocol, memory-boundary, CPU-subset, save-state, and workspace-storage tests.
 
 ## Requirements and run
 
@@ -40,6 +41,7 @@ npm start
 - `apps/server`: HTTP API and authenticated PTY/WebSocket session host.
 - `packages/protocol`: versioned and validated client/server messages.
 - `packages/runtime`: execution-backend contract and guest-memory primitives.
+- `packages/workspace`: IndexedDB persistence and an in-memory test adapter.
 - `tests`: protocol and memory safety tests.
 
 ## Compatibility status
