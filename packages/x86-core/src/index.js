@@ -420,8 +420,10 @@ export class X86Cpu {
     if (this.halted) return { state: "halted", ip: this.ip };
     const start = this.ip;
     if (this.mode === 32 && (this.flags & (1n << 9n)) !== 0n && this.pendingInterrupts.length) {
-      const vector = this.pendingInterrupts.shift();
+      const vector = this.pendingInterrupts[0];
+      // A request is consumed only after successful architectural delivery.
       this.#deliverSoftwareInterrupt(vector, this.ip, start, false);
+      this.pendingInterrupts.shift();
     }
     let operand16 = false;
     let address32 = false;
