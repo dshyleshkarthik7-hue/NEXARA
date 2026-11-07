@@ -350,3 +350,18 @@ test("F7 signed IMUL handles negative products and signed overflow", () => {
   assert.equal((flags & 1n) !== 0n, false);
   assert.equal((flags & (1n << 11n)) !== 0n, false);
 });
+
+
+test("IMUL immediate forms sign-extend imm8 and compute signed products", () => {
+  const cpu = cpuFor([0x6b,0xc8,0xf9], 32);
+  cpu.setRegister(0, 6n, 32);
+  cpu.step();
+  assert.equal(cpu.getRegister(1,32), 0xffffffe2n);
+  const wide = cpuFor([0x69,0xc8,0x00,0x00,0x00,0x40], 32);
+  wide.setRegister(0, 2n, 32);
+  wide.step();
+  assert.equal(wide.getRegister(1,32), 0x80000000n);
+  const flags = BigInt(wide.saveState().flags);
+  assert.equal((flags & 1n) !== 0n, true);
+  assert.equal((flags & (1n << 11n)) !== 0n, true);
+});
