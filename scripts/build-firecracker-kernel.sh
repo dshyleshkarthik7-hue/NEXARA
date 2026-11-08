@@ -21,7 +21,7 @@ make -C "$SRC" ARCH="$ARCH" defconfig
 cfg="$SRC/scripts/config"
 "$cfg" --file "$SRC/.config" --enable 64BIT --enable X86_64
 "$cfg" --file "$SRC/.config" --enable PRINTK --enable TTY --enable SERIAL_8250 --enable SERIAL_8250_CONSOLE
-"$cfg" --file "$SRC/.config" --enable BLOCK --enable VIRTIO --enable VIRTIO_PCI --enable VIRTIO_BLK
+"$cfg" --file "$SRC/.config" --enable BLOCK --enable VIRTIO --enable VIRTIO_MMIO --enable VIRTIO_BLK --enable VIRTIO_PCI
 "$cfg" --file "$SRC/.config" --enable BLK_DEV_INITRD --enable DEVTMPFS --enable DEVTMPFS_MOUNT
 "$cfg" --file "$SRC/.config" --enable PROC_FS --enable SYSFS --enable TMPFS
 "$cfg" --file "$SRC/.config" --enable EXT4_FS --enable MSDOS_PARTITION
