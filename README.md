@@ -18,7 +18,8 @@ NEXARA currently combines a browser editor/workspace, a server session gateway, 
 - Experimental 32/64-bit x86 integer interpreter with a limited instruction set, CPU/memory save-state support, selected control-register/MSR operations, and guest I/O bus instructions.
 - Bounded GDT/LDT/IDT readers, GDTR/IDTR/LDTR/TR state, selected LGDT/LIDT/LLDT/LTR instructions, 32-bit and 64-bit TSS descriptor validation, 32-bit TSS I/O bitmap enforcement, 64-bit TSS RSP/IST state, long-mode IDT interrupt delivery, and constrained protected-mode privilege-transition paths.
 - PC/AT-style PIC/PIT device models and interrupt-fabric integration.
-- Signed VM capability-lease policy primitive. It is not yet enforced by a production microVM supervisor or device broker.
+- Signed VM capability leases with per-operation storage/network authorization, lease-bound lifecycle orchestration, persistent per-VM file-backed block devices, and broker-mediated sector I/O. These are host-side primitives and a driver interface, not a production hypervisor supervisor or complete host-enforced isolation stack.
+- DNS-pinned egress policy adapter that rejects private, loopback, link-local, reserved, documentation and other non-global addresses (including mixed public/private DNS answer sets); callers must use its pinned lookup callback and re-authorize redirects. This is a policy adapter, not an installed host firewall or virtual NIC.
 - Automated tests for the implemented CPU, memory, paging, descriptor, interrupt, I/O, device, protocol, workspace, and session subsets.
 
 ## Requirements and run
@@ -55,7 +56,7 @@ The ZIP is written to `dist/NEXARA-package.zip`. This is a source distribution, 
 - `packages/protocol`: validated client/server messages.
 - `packages/runtime`: guest memory, paging, and PC device models.
 - `packages/x86-core`: bounded x86 interpreter, descriptor/segment state, TSS and backend adapter.
-- `packages/security`: signed capability-lease policy primitive.
+- `packages/security`: signed leases, capability broker, VM lifecycle coordinator, and DNS-pinned egress policy adapter.
 - `packages/workspace`: browser workspace persistence.
 - `tests`: automated regression suite.
 
@@ -71,11 +72,11 @@ The current loader-plus-interpreter path can stage and execute a minimal boot-se
 
 The browser is not a host security boundary. The PTY backend runs host processes and is not a VM. The server disables unsandboxed PTY sessions by default; the explicit opt-in is only for trusted local development and is rejected on non-loopback binds. The Docker sandbox policy drops capabilities, disables networking, uses a read-only root filesystem, and applies resource limits. gVisor (`runsc`) adds a syscall isolation layer but still relies on the host kernel; Kata runtime is reported separately as a VM-backed kernel boundary. Neither has been integrated into a dedicated, separately privileged supervisor or independently escape-tested.
 
-Before untrusted multi-tenant use, NEXARA still needs a dedicated microVM supervisor, enforceable signed leases, capability-based device and network brokers, per-VM storage isolation, robust image intake, adversarial escape tests, fuzzing, and independent security review. See [SECURITY-ARCHITECTURE.md](SECURITY-ARCHITECTURE.md).
+Before untrusted multi-tenant use, NEXARA still needs a real hypervisor-backed supervisor/driver, host-enforced virtual networking and firewall rules, broker integration into the actual VM device path, copy-on-write image overlays and robust image intake, firmware and a bootable guest pipeline, adversarial escape tests, fuzzing, and independent security review. The current supervisor is a lifecycle coordinator requiring an externally supplied microVM driver; the egress adapter pins DNS answers but does not itself install host firewall rules. See [SECURITY-ARCHITECTURE.md](SECURITY-ARCHITECTURE.md).
 
 ## Current completion estimate
 
-For the broader goal of a **bootable, Linux-capable, securely isolated x86 virtual machine**, the repository is approximately **39% complete**. This is an engineering estimate, not a measured test metric: the workspace, early interpreter, paging-aware 32-bit ring transition, explicit error-code exception frames, opt-in page-fault/double-fault delivery, and 64-bit TSS/LTR/IST interrupt delivery exist, but firmware/boot, broad x86 compatibility, complete hardware task switching, a production microVM supervisor, virtual device stack, Linux guest support, and adversarial security validation are still major unfinished work.
+For the broader goal of a **bootable, Linux-capable, securely isolated x86 virtual machine**, the repository is approximately **41% complete**. This is an engineering estimate, not a measured test metric: the workspace, early interpreter, paging-aware 32-bit ring transition, explicit error-code exception frames, opt-in page-fault/double-fault delivery, and 64-bit TSS/LTR/IST interrupt delivery exist, but firmware/boot, broad x86 compatibility, complete hardware task switching, a production hypervisor-backed supervisor, host-enforced virtual networking, firmware/boot pipeline, virtual device integration, Linux guest support, and adversarial security validation are still major unfinished work.
 
 ## Configuration
 
