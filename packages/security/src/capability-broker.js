@@ -54,6 +54,16 @@ export class VmCapabilityBroker {
     return write(lba, data);
   }
 
+  async readBlockDevice({ lba, count = 1, device } = {}) {
+    if (!device || typeof device.readSectors !== "function") throw new TypeError("A block device adapter is required");
+    return this.readStorage({ lba, count, read: (sector, sectors) => device.readSectors(sector, sectors) });
+  }
+
+  async writeBlockDevice({ lba, data, device } = {}) {
+    if (!device || typeof device.writeSectors !== "function") throw new TypeError("A block device adapter is required");
+    return this.writeStorage({ lba, data, write: (sector, bytes) => device.writeSectors(sector, bytes) });
+  }
+
   authorizeNetwork(target) {
     const lease = this.authorize("network-egress");
     let url;
