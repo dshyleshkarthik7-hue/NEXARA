@@ -106,3 +106,49 @@ test("real-mode INT and IRET use the IVT and restore FLAGS, CS, IP and SP", () =
   assert.equal(cpu.sp, 0x7c00);
   assert.equal(cpu.flags & 0x300, 0x300);
 });
+
+test("real-mode CMP and conditional branches evaluate unsigned and signed flags", () => {
+  const { cpu } = cpuFor([
+    0xb8,0x34,0x12,       // MOV AX,1234h
+    0x3d,0x34,0x12,       // CMP AX,1234h
+    0x74,0x03,            // JE over MOV BX,1
+    0xbb,0x01,0x00,
+    0xf4
+  ]);
+  cpu.run({ maxInstructions: 8 });
+  assert.equal(cpu.bx, 0);
+  assert.equal(cpu.flags & 0x40, 0x40);
+
+  const { cpu: unsigned } = cpuFor([
+    0xb8,0x00,0x00,       // MOV AX,0
+    0x3d,0x01,0x00,       // CMP AX,1 (borrow)
+    0x72,0x03,            // JB over MOV BX,1
+    0xbb,0x01,0x00,
+    0xf4
+  ]);
+  unsigned.run({ maxInstructions: 8 });
+  assert.equal(unsigned.bx, 0);
+  assert.equal(unsigned.flags & 1, 1);
+});
+
+test("real-mode LOOP decrements CX and repeats a short instruction body", () => {
+  const { cpu } = cpuFor([
+    0xb9,0x03,0x00, // MOV CX,3
+    0x43,           // INC BX
+    0xe2,0xfd,      // LOOP back to INC BX
+    0xf4
+  ]);
+  const result = cpu.run({ maxInstructions: 16 });
+  assert.equal(result.state, "halted");
+  assert.equal(cpu.bx, 3);
+  assert.equal(cpu.cx, 0);
+  assert.equal(result.instructionsExecuted, 8);
+});
+
+test("real-mode CLD and STD update only the direction flag", () => {
+  const { cpu } = cpuFor([0xfd,0xfc,0xf4]);
+  cpu.step();
+  assert.equal(cpu.flags & 0x400, 0x400);
+  cpu.step();
+  assert.equal(cpu.flags & 0x400, 0);
+});
