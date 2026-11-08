@@ -144,7 +144,7 @@ export class X86Cpu {
   switchTask(selector, { reason = "jmp", returnIp = this.ip } = {}) {
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Hardware task switching requires 32-bit protected mode", this.ip);
     if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n) throw new CpuFault("Task switching with paging enabled is not supported", this.ip);
-    if (reason !== "jmp" && reason !== "task-gate") throw new CpuFault("Unsupported task-switch reason", this.ip);
+    if (!["jmp", "call", "task-gate"].includes(reason)) throw new CpuFault("Unsupported task-switch reason", this.ip);
     if (!Number.isInteger(selector) || selector <= 0 || selector > 0xffff || (selector & 4) !== 0) throw new CpuFault("Task switch requires a non-null GDT selector", this.ip);
     if (!Number.isSafeInteger(returnIp) || returnIp < 0 || returnIp > 0xffffffff) throw new CpuFault("Task return IP is outside 32-bit range", this.ip);
     const current = this.systemTables.task;
@@ -153,7 +153,7 @@ export class X86Cpu {
       const currentDescriptor = this.gdt.readSystemDescriptor(current.selector, { allowedTypes: [11] });
       if (currentDescriptor.base !== current.base || currentDescriptor.limit < 0x67n) throw new Error("Current TR does not match its busy GDT TSS descriptor");
       const targetDescriptor = this.gdt.readSystemDescriptor(selector, { allowedTypes: [9] });
-      if (reason === "jmp" && Math.max(this.segments.cpl, selector & 3) > targetDescriptor.dpl) throw new Error("Task-switch selector privilege check failed");
+      if (reason !== "task-gate" && Math.max(this.segments.cpl, selector & 3) > targetDescriptor.dpl) throw new Error("Task-switch selector privilege check failed");
       if (targetDescriptor.limit < 0x67n || targetDescriptor.base > 0xffffffffn) throw new Error("Target TSS must be a bounded 32-bit TSS with a 104-byte header");
       const targetTss = new X86Tss32(this.memory, { base: targetDescriptor.base, limit: Number(targetDescriptor.limit) });
       const incoming = targetTss.getTaskState();
@@ -186,7 +186,7 @@ export class X86Cpu {
       // Descriptor writes and the CPU commit occur only after the incoming image validates.
       const targetAccess = targetDescriptor.raw[5] | 2;
       const currentAccess = reason === "jmp" ? currentDescriptor.raw[5] & ~2 : currentDescriptor.raw[5];
-      if (reason === "task-gate") targetTss.backlink = current.selector;
+      if (reason === "task-gate" || reason === "call") targetTss.backlink = current.selector;
       this.memory.write(Number(targetAccessAddress), Uint8Array.of(targetAccess));
       if (reason === "jmp") this.memory.write(Number(currentAccessAddress), Uint8Array.of(currentAccess));
       if (nextLdtr) this.systemTables.loadLdtr(nextLdtr); else this.systemTables.clearLdtr();
@@ -194,9 +194,9 @@ export class X86Cpu {
       this.#syncDescriptorTables();
       for (let i = 0; i < 8; i++) this.setRegister(i, BigInt(incoming.registers[["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"][i]]), 32);
       this.controlRegisters.set(3, BigInt(targetTss.cr3));
-      this.flags = reason === "task-gate"
+      this.flags = (reason === "task-gate" || reason === "call")
         ? BigInt(incoming.eflags) | (1n << 14n)
-        : BigInt(incoming.eflags) & ~(1n << 14n); // Nested-task flag is set only for task-gate switches.
+        : BigInt(incoming.eflags) & ~(1n << 14n); // CALL/task-gate switches establish nested-task state.
       this.ip = incoming.eip;
       this.segments = nextSegments;
       return Object.freeze({ selector, ip: this.ip, cpl: this.segments.cpl, task: this.systemTables.snapshot().task });
@@ -938,6 +938,19 @@ export class X86Cpu {
         }
         this.#writeOperand(decoded.operand, result, width);
       }
+    } else if (opcode === 0x9a) {
+      if ((this.controlRegisters.get(0) & 1n) === 0n || this.mode === 64) throw new CpuFault("Immediate far CALL requires 32-bit protected mode", start);
+      const offset = this.#fetchUnsigned(operand16 ? 2 : 4);
+      const selector = Number(this.#fetchUnsigned(2));
+      try {
+        if ((selector & 4) !== 0) throw new Error("Far CALL through an LDT selector is unsupported");
+        const descriptor = this.gdt.readSegment(selector, { cpl: this.segments.cpl });
+        if (!descriptor?.system) throw new Error("Far CALL to ordinary code segments is not implemented");
+        if (descriptor.type !== 9) throw new Error("Far CALL task switch requires an available 32-bit TSS");
+        // The offset field is architecturally ignored for a TSS task switch.
+        void offset;
+        this.switchTask(selector, { reason: "call", returnIp: this.ip });
+      } catch (error) { throw new CpuFault(error.message, start); }
     } else if (opcode === 0xea) {
       if ((this.controlRegisters.get(0) & 1n) === 0n || this.mode === 64) throw new CpuFault("Immediate far jump requires 32-bit protected mode", start);
       const offset = this.#fetchUnsigned(operand16 ? 2 : 4);
