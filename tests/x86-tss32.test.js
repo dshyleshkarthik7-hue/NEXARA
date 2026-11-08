@@ -341,3 +341,26 @@ test("32-bit far JMP task switch reads TSS images through the active page tables
   assert.equal(oldTss.getTaskState().eip, 0x707);
   assert.equal(newTss.getTaskState().eip, 0x750);
 });
+
+
+test("paged TSS task-switch faults update CR2 with the failing linear address", () => {
+  const memory = new GuestMemory({ initialPages: 16, maximumPages: 16 });
+  const paging = new X86LegacyPaging32(memory);
+  const cpu = new X86Cpu({ memory, mode: 32, legacyPaging32: paging, instructionPointer: 0x700 });
+  const gdtBase = 0x100;
+  const putDescriptor = (index, access, base = 0, limit = 0x67) => memory.write(gdtBase + index * 8,
+    Uint8Array.from([limit & 255, (limit >>> 8) & 255, base & 255, (base >>> 8) & 255, (base >>> 16) & 255, access, (limit >>> 16) & 0x0f, (base >>> 24) & 255]));
+  putDescriptor(1, 0x9a, 0, 0xffff); putDescriptor(2, 0x92, 0, 0xffff);
+  putDescriptor(5, 0x8b, 0x3000);
+  putDescriptor(6, 0x89, 0x4000);
+  cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
+  cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x3000, limit: 0x67, present: true, busy: true, usable: true });
+  const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
+  put32(0x1000, 0x2003); put32(0x2000, 0x0003); put32(0x2000 + 3 * 4, 0x5003);
+  paging.loadCr3(0x1000);
+  cpu.writeControlRegister(3, 0x1000n);
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n | (1n << 31n));
+  assert.throws(() => cpu.switchTask(0x30), /Task switch failed/);
+  assert.equal(cpu.readControlRegister(2), 0x4020n);
+  assert.equal(cpu.systemTables.task.selector, 0x28);
+});
