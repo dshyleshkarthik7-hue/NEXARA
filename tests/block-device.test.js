@@ -16,7 +16,7 @@ test("memory block device rejects partial sectors and out-of-range LBAs", () => 
   assert.throws(() => disk.readSectors(2), RangeError);
   assert.throws(() => disk.readSectors(0, 3), RangeError);
   assert.throws(() => disk.writeSectors(0, new Uint8Array(511)), /whole 512-byte sectors/);
-  assert.throws(() => disk.writeSectors(0, new Uint8Array(1024)), RangeError);
+  assert.throws(() => disk.writeSectors(1, new Uint8Array(1024)), RangeError);
 });
 
 test("read-only block devices reject writes", () => {
