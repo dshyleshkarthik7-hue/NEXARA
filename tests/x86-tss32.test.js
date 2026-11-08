@@ -281,3 +281,58 @@ test("32-bit IDT task gate switches tasks and records backlink", () => {
   assert.equal(memory.read(gdtBase + 5 * 8 + 5, 1)[0] & 0x0f, 0x0b);
   assert.equal(memory.read(gdtBase + 6 * 8 + 5, 1)[0] & 0x0f, 0x09);
 });
+
+
+test("X86Tss32 reads and writes linear TSS fields through legacy 32-bit paging", () => {
+  const memory = new GuestMemory({ initialPages: 8, maximumPages: 8 });
+  const paging = new X86LegacyPaging32(memory);
+  const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
+  put32(0x1000, 0x2003);
+  put32(0x2000 + 3 * 4, 0x5003); // linear page 3 -> physical page 5
+  paging.loadCr3(0x1000);
+  const tss = new X86Tss32(memory, { base: 0x3000, limit: 0x67, paging });
+  const state = {
+    eip: 0x1234, eflags: 0x202,
+    registers: { eax: 1, ecx: 2, edx: 3, ebx: 4, esp: 0x1800, ebp: 6, esi: 7, edi: 8 },
+    segments: { es: 0x10, cs: 0x08, ss: 0x10, ds: 0x10, fs: 0, gs: 0, ldt: 0 }
+  };
+  assert.deepEqual(tss.setTaskState(state), state);
+  assert.deepEqual(tss.getTaskState(), state);
+  assert.deepEqual(new X86Tss32(memory, { base: 0x3000, limit: 0x67, paging }).getTaskState(), state);
+  assert.notDeepEqual(memory.read(0x3000, 4), memory.read(0x5000, 4));
+});
+
+test("32-bit far JMP task switch reads TSS images through the active page tables", () => {
+  const memory = new GuestMemory({ initialPages: 16, maximumPages: 16 });
+  const paging = new X86LegacyPaging32(memory);
+  const cpu = new X86Cpu({ memory, mode: 32, legacyPaging32: paging, instructionPointer: 0x700 });
+  const gdtBase = 0x100;
+  const putDescriptor = (index, access, base = 0) => memory.write(gdtBase + index * 8,
+    Uint8Array.from([0x67, 0, base & 255, (base >>> 8) & 255, (base >>> 16) & 255, access, 0, (base >>> 24) & 255]));
+  putDescriptor(1, 0x9a); putDescriptor(2, 0x92);
+  putDescriptor(5, 0x8b, 0x3000); // current busy TSS linear base
+  putDescriptor(6, 0x89, 0x4000); // target available TSS linear base
+  cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
+  cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x3000, limit: 0x67, present: true, busy: true, usable: true });
+  // Identity-map page tables, then map the two TSS linear pages to separate frames.
+  const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
+  put32(0x1000, 0x2003);
+  put32(0x2000 + 3 * 4, 0x5003);
+  put32(0x2000 + 4 * 4, 0x6003);
+  paging.loadCr3(0x1000);
+  cpu.writeControlRegister(3, 0x1000n);
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n | (1n << 31n));
+  const oldTss = new X86Tss32(memory, { base: 0x3000, limit: 0x67, paging });
+  const newTss = new X86Tss32(memory, { base: 0x4000, limit: 0x67, paging });
+  newTss.setTaskState({
+    eip: 0x750, eflags: 0x202,
+    registers: { eax: 0x11, ecx: 0x22, edx: 0x33, ebx: 0x44, esp: 0x1f00, ebp: 0x66, esi: 0x77, edi: 0x88 },
+    segments: { es: 0x10, cs: 0x08, ss: 0x10, ds: 0x10, fs: 0x10, gs: 0x10, ldt: 0 }
+  });
+  memory.write(0x700, Uint8Array.of(0xea, 0, 8, 0, 0, 0x30, 0));
+  cpu.step();
+  assert.equal(cpu.ip, 0x750);
+  assert.equal(cpu.systemTables.task.selector, 0x30);
+  assert.equal(oldTss.getTaskState().eip, 0x707);
+  assert.equal(newTss.getTaskState().eip, 0x750);
+});
