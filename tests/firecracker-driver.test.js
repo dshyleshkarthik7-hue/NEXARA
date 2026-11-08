@@ -128,3 +128,33 @@ test("Firecracker driver rejects a root disk larger than the signed disk quota",
   }), /exceeds the leased disk quota/);
   assert.equal(starts, 0);
 });
+
+
+test("Firecracker driver attaches a broker-managed copy-on-write disk as raw rootfs", async t => {
+  const f = await fixture(t);
+  const calls = [];
+  const rootfsDevice = {
+    sectors: 2048,
+    materializeRaw: async target => {
+      calls.push(target);
+      await writeFile(target, Buffer.alloc(2048 * 512, 0x5a), { flag: "wx", mode: 0o600 });
+      return { path: target, sectors: 2048, byteLength: 2048 * 512, format: "raw" };
+    }
+  };
+  const driver = new FirecrackerDriver({ provider: f.provider, resolveImage: f.resolveImage });
+  const handle = await driver.launch({ ...config, rootfsDevice });
+  const staged = path.join(f.jailRoot, "nexara", "rootfs.ext4");
+  assert.deepEqual(calls, [staged]);
+  assert.equal((await readFile(staged)).length, 2048 * 512);
+  assert.equal(f.requests.find(x => x.url === "/drives/rootfs").body.path_on_host, "/nexara/rootfs.ext4");
+  await driver.stop(handle);
+  await assert.rejects(() => readFile(staged), { code: "ENOENT" });
+});
+
+test("Firecracker driver rejects broker root disks exceeding lease quota", async t => {
+  const f = await fixture(t);
+  let starts = 0;
+  const driver = new FirecrackerDriver({ provider: { start: async () => { starts++; }, stop: async () => {} }, resolveImage: f.resolveImage });
+  await assert.rejects(() => driver.launch({ ...config, quotas: { ...config.quotas, diskMiB: 1 }, rootfsDevice: { sectors: 4097, materializeRaw: async () => ({}) } }), /Invalid broker-managed root disk/);
+  assert.equal(starts, 0);
+});
