@@ -20,8 +20,9 @@ export class VmSupervisor {
   #recoveryComplete;
   #recoveryPromise = null;
   #rootDiskFactory;
+  #releaseRootDisk;
 
-  constructor({ authority, driver, clock = Date.now, limits = {}, recoveryJournal = null, resolveRecoveryDevice = null, rootDiskFactory = null } = {}) {
+  constructor({ authority, driver, clock = Date.now, limits = {}, recoveryJournal = null, resolveRecoveryDevice = null, rootDiskFactory = null, releaseRootDisk = null } = {}) {
     if (!authority || typeof authority.verify !== "function"
       || typeof driver?.launch !== "function" || typeof driver?.stop !== "function"
       || driver.isolationType !== "microvm" || typeof clock !== "function") {
@@ -42,11 +43,13 @@ export class VmSupervisor {
     if (recoveryJournal !== null && typeof recoveryJournal.recoverPending !== "function") throw new TypeError("Invalid durable recovery journal");
     if (resolveRecoveryDevice !== null && typeof resolveRecoveryDevice !== "function") throw new TypeError("Invalid recovery disk resolver");
     if (rootDiskFactory !== null && typeof rootDiskFactory !== "function") throw new TypeError("Invalid root disk factory");
+    if (releaseRootDisk !== null && typeof releaseRootDisk !== "function") throw new TypeError("Invalid root disk release callback");
     if (recoveryJournal && !resolveRecoveryDevice) throw new TypeError("Recovery disk resolver is required with a recovery journal");
     this.#clock = clock;
     this.#recoveryJournal = recoveryJournal;
     this.#resolveRecoveryDevice = resolveRecoveryDevice;
     this.#rootDiskFactory = rootDiskFactory;
+    this.#releaseRootDisk = releaseRootDisk;
     // A configured journal is a startup barrier: no workload may launch until
     // every pending disk has been replayed successfully.
     this.#recoveryComplete = !recoveryJournal;
@@ -60,12 +63,13 @@ export class VmSupervisor {
     });
     this.#reserve(lease.quotas);
     const id = randomUUID();
-    const record = { id, quotas: lease.quotas, state: "starting", leaseId: lease.id, subject: lease.subject, imageDigest: lease.imageDigest, envelope, handle: null };
+    const record = { id, quotas: lease.quotas, state: "starting", leaseId: lease.id, subject: lease.subject, imageDigest: lease.imageDigest, envelope, handle: null, rootfsDevice: null };
     this.#instances.set(id, record);
     try {
       const rootfsDevice = this.#rootDiskFactory
         ? await this.#rootDiskFactory({ id, lease, quotas: lease.quotas, imageDigest: lease.imageDigest })
         : undefined;
+      record.rootfsDevice = rootfsDevice ?? null;
       const handle = await this.#driver.launch(Object.freeze({
         id,
         ...(rootfsDevice ? { rootfsDevice } : {}),
@@ -86,6 +90,7 @@ export class VmSupervisor {
     } catch (error) {
       record.state = "failed";
       this.#instances.delete(id);
+      if (rootfsDevice && this.#releaseRootDisk) await this.#releaseRootDisk(id).catch(() => {});
       throw error;
     }
   }
@@ -156,6 +161,7 @@ export class VmSupervisor {
     record.state = "stopping";
     try {
       if (record.handle) await this.#driver.stop(record.handle);
+      if (record.rootfsDevice && this.#releaseRootDisk) await this.#releaseRootDisk(id);
       record.state = "stopped";
       this.#instances.delete(id);
       return true;
