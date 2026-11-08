@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, lstat, open, readFile, rename, unlink } from "node:fs/promises";
+import { mkdir, lstat, open, readFile, rename, unlink, link } from "node:fs/promises";
 import path from "node:path";
 import { CopyOnWriteBlockDevice } from "../../runtime/src/copy-on-write-block-device.js";
 
@@ -98,11 +98,10 @@ export class PersistentVmStorageRegistry {
     try { await file.writeFile(JSON.stringify(record) + "\n"); await file.sync(); }
     finally { await file.close(); }
     try {
-      // link() is not used: rename is atomic, but concurrent first writers
-      // could race. Recheck immediately before publishing and fail closed.
-      try { await lstat(target); throw new Error("Stable workload identity was concurrently allocated; retry lookup"); }
-      catch (error) { if (error.code !== "ENOENT") throw error; }
-      await rename(temp, target);
+      // Hard-link publication is atomic and fails if another writer won;
+      // unlike rename it cannot overwrite a concurrently-created identity.
+      await link(temp, target);
+      await unlink(temp);
       await this.#syncDirectory();
     } catch (error) {
       await unlink(temp).catch(() => {});
