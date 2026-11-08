@@ -108,6 +108,13 @@ export class VmLeaseAuthority {
     return freezeDeep(structuredClone(lease));
   }
 
+  verifyCapability(envelope, capability, options = {}) {
+    if (!CAPABILITIES.has(capability)) throw new TypeError("Unknown VM capability");
+    const lease = this.verify(envelope, options);
+    if (!lease.capabilities.includes(capability)) throw new Error("VM capability was not granted by the lease");
+    return lease;
+  }
+
   static assertCapability(lease, capability) {
     if (!lease || lease.format !== FORMAT || !CAPABILITIES.has(capability) || !lease.capabilities.includes(capability)) {
       throw new Error("VM capability was not granted by the lease");
