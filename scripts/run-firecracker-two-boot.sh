@@ -33,7 +33,9 @@ trap cleanup EXIT
 cp "$DISK" "$work/persistent.ext4"
 chmod 0600 "$work/persistent.ext4"
 run_boot(){
-  local number="$1" id="nexara-$RANDOM-$number" jailroot="$base/firecracker/$id/root"
+  local number="$1"
+  local id="nexara-$RANDOM-$number"
+  local jailroot="$base/firecracker/$id/root"
   mkdir -p "$jailroot/run"
   install -m 0444 "$KERNEL" "$jailroot/vmlinux.bin"
   install -m 0444 "$INITRD" "$jailroot/initramfs.cpio.gz"
