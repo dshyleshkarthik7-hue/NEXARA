@@ -143,7 +143,8 @@ export class X86Cpu {
    */
   switchTask(selector, { reason = "jmp", returnIp = this.ip } = {}) {
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Hardware task switching requires 32-bit protected mode", this.ip);
-    if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n) throw new CpuFault("Task switching with paging enabled is not supported", this.ip);
+    const pagingEnabled = (this.controlRegisters.get(0) & (1n << 31n)) !== 0n;
+    if (pagingEnabled && !this.legacyPaging32) throw new CpuFault("Paged 32-bit task switching requires the legacy paging backend", this.ip);
     if (!["jmp", "call", "task-gate", "iret-task"].includes(reason)) throw new CpuFault("Unsupported task-switch reason", this.ip);
     if (!Number.isInteger(selector) || selector <= 0 || selector > 0xffff || (selector & 4) !== 0) throw new CpuFault("Task switch requires a non-null GDT selector", this.ip);
     if (!Number.isSafeInteger(returnIp) || returnIp < 0 || returnIp > 0xffffffff) throw new CpuFault("Task return IP is outside 32-bit range", this.ip);
@@ -155,10 +156,11 @@ export class X86Cpu {
       const targetDescriptor = this.gdt.readSystemDescriptor(selector, { allowedTypes: reason === "iret-task" ? [11] : [9] });
       if (["jmp", "call"].includes(reason) && Math.max(this.segments.cpl, selector & 3) > targetDescriptor.dpl) throw new Error("Task-switch selector privilege check failed");
       if (targetDescriptor.limit < 0x67n || targetDescriptor.base > 0xffffffffn) throw new Error("Target TSS must be a bounded 32-bit TSS with a 104-byte header");
-      const targetTss = new X86Tss32(this.memory, { base: targetDescriptor.base, limit: Number(targetDescriptor.limit) });
+      const taskPaging = pagingEnabled ? this.legacyPaging32 : null;
+      const targetTss = new X86Tss32(this.memory, { base: targetDescriptor.base, limit: Number(targetDescriptor.limit), paging: taskPaging });
       const incoming = targetTss.getTaskState();
       const incomingCr3 = BigInt(targetTss.cr3);
-      if ((incomingCr3 & 0xfffn) !== 0n || incomingCr3 >= BigInt(this.memory.byteLength)) {
+      if ((incomingCr3 & 0xfffn) !== 0n || incomingCr3 + 4096n > BigInt(this.memory.byteLength)) {
         throw new Error("Incoming TSS CR3 must be an aligned in-range page-directory base");
       }
       if ((incoming.eflags & 2) === 0) throw new Error("Incoming TSS EFLAGS reserved bit 1 must be set");
@@ -179,7 +181,7 @@ export class X86Cpu {
       const targetAccessAddress = this.gdt.base + BigInt((selector >>> 3) * 8 + 5);
       const currentAccessAddress = this.gdt.base + BigInt((current.selector >>> 3) * 8 + 5);
       if (targetAccessAddress >= BigInt(this.memory.byteLength) || currentAccessAddress >= BigInt(this.memory.byteLength)) throw new Error("TSS descriptor access byte exceeds guest memory");
-      const oldTss = new X86Tss32(this.memory, { base: current.base, limit: current.limit });
+      const oldTss = new X86Tss32(this.memory, { base: current.base, limit: current.limit, paging: taskPaging });
       oldTss.setTaskState({
         eip: returnIp, eflags: Number(this.flags & 0xffffffffn),
         registers: { eax: Number(this.getRegister(0, 32)), ecx: Number(this.getRegister(1, 32)), edx: Number(this.getRegister(2, 32)), ebx: Number(this.getRegister(3, 32)),
