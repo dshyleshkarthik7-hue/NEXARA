@@ -25,7 +25,7 @@ await server.listen({ host: "127.0.0.1", port: 8788 });
 server.addHook("onClose", async () => host.close());
 ```
 
-The provider and both resolvers are host-trusted dependencies. In particular, `resolveBaseDevice(digest)` must return a read-only block device whose bytes hash to that digest; it must not accept guest-supplied paths.
+The provider and both resolvers are host-trusted dependencies. In particular, `resolveBaseDevice(digest)` must return a read-only block device whose bytes hash to that digest; it must not accept guest-supplied paths. `authorizeVmRequest({ identity, request })` must enforce tenant quotas, image allowlists, capability grants, egress policy, and lease duration, returning the server-approved policy. The API never signs privileges directly from client input.
 
 ## Persistent state layout
 
