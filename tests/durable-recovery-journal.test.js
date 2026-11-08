@@ -64,7 +64,7 @@ test("durable recovery journal excludes an active worker lock", async t => {
   const journal = new DurableRecoveryJournal({ directory: journalDirectory });
   await journal.save({ vmId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", sourcePath: source });
   await writeFile(path.join(journalDirectory, ".recovery.lock"),
-    JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }) + "\\n",
+    JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
     { mode: 0o600 });
   await assert.rejects(
     () => journal.recoverPending(async () => ({ importRaw: async () => ({}) })),
