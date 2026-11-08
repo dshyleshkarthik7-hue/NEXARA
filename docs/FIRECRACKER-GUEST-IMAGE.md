@@ -26,3 +26,26 @@ The egress probe is advisory; a failed TCP connection alone does not prove firew
 
 ## Limitations
 The builder requires a static BusyBox and a compatible kernel supplied by the operator. It does not download or compile a kernel, sign images, or produce a full Linux distribution. The minimal shell is PID 1 and does not include SSH, systemd, package management, or a general-purpose service stack. CI tests mocked Firecracker API/process boundaries. Real guest boot, guest escape probes, and disk persistence after actual host power loss still require a dedicated KVM runner.
+
+## Building NEXARA's own host binaries
+
+NEXARA builds the **upstream Firecracker and jailer executables** from a pinned upstream release; it does not implement a new VMM or a substitute jailer. The two executables are built from the same Firecracker source tree and version. Static BusyBox is built separately with musl for the minimal guest initramfs.
+
+On Ubuntu 24.04, run:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y build-essential clang cmake pkg-config libssl-dev musl-tools musl-dev cpio gzip git curl wget perl file python3
+bash scripts/build-host-binaries.sh
+bash scripts/build-firecracker-guest-initramfs.sh \
+  "$PWD/dist/host-binaries/busybox" \
+  "$PWD/dist/host-binaries/nexara-guest-initramfs.cpio.gz"
+```
+
+Or run the **Build NEXARA host binaries** GitHub Actions workflow. It uploads Firecracker, jailer, static BusyBox, the initramfs, build metadata and SHA-256 checksums as a 30-day artifact. Review the pinned source tags, build logs and hashes before promoting binaries to a production host. A successful compilation does not mean a Firecracker guest has booted.
+
+## Alpine Linux compatibility
+
+Firecracker is a microVM VMM, not a PC emulator: it does not boot a conventional Alpine ISO through BIOS/UEFI. It boots a Linux kernel directly. For an Alpine-based guest, use a trusted Firecracker-compatible kernel (with virtio block and serial console support) and an Alpine **minirootfs tarball** installed into an ext4 root disk, or use the minimal BusyBox initramfs built above. The current validation initramfs is intentionally a tiny test guest, not a full Alpine userspace.
+
+Do not feed an Alpine ISO to `boot-source`. To test a full Alpine userspace, create an ext4 image from a digest-pinned Alpine minirootfs, populate it using a trusted image-building pipeline, configure a compatible init process and serial console, and attach it as the root block device. Pin and record the Alpine release, minirootfs digest and kernel digest in the trusted image manifest.
