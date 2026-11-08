@@ -11,12 +11,16 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   t.after(() => rm(directory, { recursive: true, force: true }));
   const jailer = path.join(directory, "jailer");
   const firecracker = path.join(directory, "firecracker");
-  const netns = path.join(directory, "netns");
-  for (const file of [jailer, firecracker, netns]) await writeFile(file, "test");
+  for (const file of [jailer, firecracker]) await writeFile(file, "test");
   await chmod(jailer, 0o755);
   await chmod(firecracker, 0o755);
 
   let invoked;
+  let released = 0;
+  const networkProvider = {
+    provision: async () => ({ netnsPath: "/run/netns/nexara-test", tapName: "taptest", release: async () => { released++; } }),
+    release: async handle => handle.release()
+  };
   const spawn = (command, args, options) => {
     invoked = { command, args, options };
     const child = new EventEmitter();
@@ -33,7 +37,7 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   const provider = new LinuxJailerProvider({
     jailerPath: jailer, firecrackerPath: firecracker,
     chrootBaseDir: "/j",
-    uid: 10001, gid: 10001, netnsPath: netns, spawn
+    uid: 10001, gid: 10001, networkProvider, spawn
   });
   const host = await provider.start({
     id: "12345678-1234-4234-8234-123456789abc",
@@ -46,6 +50,7 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   assert.equal(invoked.options.shell, false);
   assert.equal(invoked.args.includes("--new-pid-ns"), false);
   assert.ok(invoked.args.includes("--netns"));
+  assert.ok(invoked.args.includes("/run/netns/nexara-test"));
   assert.ok(invoked.args.includes("cpu.max=150000 100000"));
   assert.ok(invoked.args.includes("memory.max=805306368"));
   assert.equal(host.socketPath, path.join("/j", "firecracker",
@@ -53,6 +58,7 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   assert.equal(host.jailRoot, path.dirname(host.socketPath));
   await provider.stop(host);
   assert.equal(host.child.signalCode, "SIGTERM");
+  assert.equal(released, 1);
   await provider.stop(host);
 });
 
@@ -61,14 +67,14 @@ test("Linux jailer provider rejects unsafe configuration and writable binaries",
   t.after(() => rm(directory, { recursive: true, force: true }));
   const jailer = path.join(directory, "jailer");
   const firecracker = path.join(directory, "firecracker");
-  const netns = path.join(directory, "netns");
-  for (const file of [jailer, firecracker, netns]) await writeFile(file, "test");
+  for (const file of [jailer, firecracker]) await writeFile(file, "test");
   await chmod(jailer, 0o777);
   await chmod(firecracker, 0o755);
   const provider = new LinuxJailerProvider({
     jailerPath: jailer, firecrackerPath: firecracker,
     chrootBaseDir: path.join(directory, "jails"),
-    uid: 10001, gid: 10001, netnsPath: netns,
+    uid: 10001, gid: 10001,
+    networkProvider: { provision: async () => { throw new Error("must not provision"); }, release: async () => {} },
     spawn: () => { throw new Error("must not spawn"); }
   });
   await assert.rejects(() => provider.start({
