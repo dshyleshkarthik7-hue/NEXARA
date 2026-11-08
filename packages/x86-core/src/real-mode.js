@@ -164,7 +164,7 @@ export class X86RealModeCpu {
       } else if (opcode === 0xaa || opcode === 0xab) {
         if (width === 1) this.#write8(this.es, this.di, this.ax & 0xff); else this.#write16(this.es, this.di, this.ax);
         this.di = (this.di + delta) & MASK16;
-      } else if (opcode === 0xac || opcode === 0xad || opcode === 0xa6 || opcode === 0xa7 || opcode === 0xae || opcode === 0xaf) {
+      } else if (opcode === 0xac || opcode === 0xad) {
         if (width === 1) this.#setReg8(0, this.#read8(this.segmentOverride ?? this.ds, this.si)); else this.ax = this.#read16(this.segmentOverride ?? this.ds, this.si);
         this.si = (this.si + delta) & MASK16;
       } else if (opcode === 0xa6 || opcode === 0xa7) {
