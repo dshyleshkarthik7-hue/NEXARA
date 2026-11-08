@@ -136,21 +136,23 @@ test("CPU restores a TSS image only after validating all segment selectors", () 
   assert.equal(cpu.segments.cpl, before.cpl);
 });
 
-test("CPU task-state save and restore refuse paging until TSS linear accesses are implemented", () => {
+test("CPU task-state save follows the active 32-bit paging address space", () => {
   const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
   const paging = new X86LegacyPaging32(memory);
   const cpu = new X86Cpu({ memory, mode: 32, legacyPaging32: paging, instructionPointer: 0x600 });
   cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
   cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
   const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
-  put32(0x1000, 0x1803); // page directory entry
-  put32(0x1800, 0x0003); // page table entry
+  put32(0x1000, 0x1803);
+  put32(0x1800, 0x0003); // linear page 0 -> physical page 0
   cpu.writeControlRegister(3, 0x1000n);
   cpu.writeControlRegister(0, cpu.readControlRegister(0) | 0x80000000n);
-  assert.throws(() => cpu.saveTaskStateToTss(), /paging enabled/);
-  assert.throws(() => cpu.loadTaskStateFromTss(), /paging enabled/);
+  cpu.ip = 0x650; cpu.flags = 0x202n; cpu.setRegister(0, 0x1234, 32);
+  cpu.saveTaskStateToTss();
+  const tss = new X86Tss32(memory, { base: 0x500, limit: 0x67, paging });
+  assert.equal(tss.getTaskState().eip, 0x650);
+  assert.equal(tss.getTaskState().registers.eax, 0x1234);
 });
-
 function writeTssDescriptor(memory, gdtBase, index, base, access) {
   const limit = 0x67;
   memory.write(gdtBase + index * 8, Uint8Array.from([
