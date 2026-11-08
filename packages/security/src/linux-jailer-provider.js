@@ -80,7 +80,7 @@ export class LinuxJailerProvider {
       "--cgroup-version", "2",
       "--parent-cgroup", this.#parentCgroup,
       "--cgroup", "cpu.max=" + cpuQuota + " 100000",
-      "--cgroup", "memory.max=" + String(config.quotas.memoryMiB * 1024 * 1024),
+      "--cgroup", "memory.max=" + String((config.quotas.memoryMiB + 128) * 1024 * 1024),
       "--cgroup", "memory.swap.max=0",
       "--cgroup", "pids.max=128",
       "--netns", network.netnsPath,
