@@ -60,6 +60,45 @@ export class X86RealModeCpu {
       (result === 0 ? ZF : 0) | (result & 0x8000 ? SF : 0) |
       (([0,1,2,3,4,5,6,7].filter(bit => (result >>> bit) & 1).length % 2 === 0) ? PF : 0) | 2;
   }
+  #setSubFlags(left, right, bits = 16) {
+    const mask = bits === 8 ? 0xff : MASK16;
+    const sign = bits === 8 ? 0x80 : 0x8000;
+    const a = left & mask, b = right & mask;
+    const result = (a - b) & mask;
+    this.flags = (this.flags & ~(CF | PF | AF | ZF | SF | OF)) |
+      (a < b ? CF : 0) |
+      (((a ^ b ^ result) & 0x10) ? AF : 0) |
+      (result === 0 ? ZF : 0) |
+      (result & sign ? SF : 0) |
+      (([0,1,2,3,4,5,6,7].filter(bit => (result >>> bit) & 1).length % 2 === 0) ? PF : 0) |
+      (((a ^ b) & (a ^ result) & sign) ? OF : 0) | 2;
+  }
+
+  #condition(code) {
+    const cf = Boolean(this.flags & CF), pf = Boolean(this.flags & PF);
+    const zf = Boolean(this.flags & ZF), sf = Boolean(this.flags & SF);
+    const of = Boolean(this.flags & OF);
+    switch (code & 0x0f) {
+      case 0x0: return of;
+      case 0x1: return !of;
+      case 0x2: return cf;
+      case 0x3: return !cf;
+      case 0x4: return zf;
+      case 0x5: return !zf;
+      case 0x6: return cf || zf;
+      case 0x7: return !cf && !zf;
+      case 0x8: return sf;
+      case 0x9: return !sf;
+      case 0xa: return pf;
+      case 0xb: return !pf;
+      case 0xc: return sf !== of;
+      case 0xd: return sf === of;
+      case 0xe: return zf || (sf !== of);
+      case 0xf: return !zf && (sf === of);
+      default: return false;
+    }
+  }
+
   #push(value) { this.sp = (this.sp - 2) & MASK16; this.#write16(this.ss, this.sp, value); }
   #pop() { const value = this.#read16(this.ss, this.sp); this.sp = (this.sp + 2) & MASK16; return value; }
 
@@ -75,6 +114,10 @@ export class X86RealModeCpu {
       this.flags &= ~IF;
     } else if (opcode === 0xfb) {
       this.flags |= IF;
+    } else if (opcode === 0xfc) {
+      this.flags &= ~DF;
+    } else if (opcode === 0xfd) {
+      this.flags |= DF;
     } else if (opcode >= 0xb8 && opcode <= 0xbf) {
       this.#setReg16(opcode - 0xb8, this.#fetch16());
     } else if (opcode >= 0xb0 && opcode <= 0xb7) {
@@ -107,6 +150,21 @@ export class X86RealModeCpu {
       const right = opcode === 0x31 ? this.#reg16(reg) : this.#reg16(rm);
       this.#setReg16(opcode === 0x31 ? rm : reg, left ^ right);
       this.#setLogicFlags(left ^ right);
+    } else if (opcode === 0x3d) {
+      this.#setSubFlags(this.ax, this.#fetch16());
+    } else if (opcode === 0x3c) {
+      this.#setSubFlags(this.ax & 0xff, this.#fetch8(), 8);
+    } else if (opcode >= 0x70 && opcode <= 0x7f) {
+      const displacement = this.#fetch8();
+      if (this.#condition(opcode & 0x0f)) {
+        this.ip = (this.ip + (displacement & 0x80 ? displacement - 0x100 : displacement)) & MASK16;
+      }
+    } else if (opcode === 0xe2) {
+      const displacement = this.#fetch8();
+      this.cx = (this.cx - 1) & MASK16;
+      if (this.cx !== 0) {
+        this.ip = (this.ip + (displacement & 0x80 ? displacement - 0x100 : displacement)) & MASK16;
+      }
     } else if (opcode === 0xa1) {
       this.ax = this.#read16(this.ds, this.#fetch16());
     } else if (opcode === 0xa3) {
