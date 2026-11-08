@@ -86,11 +86,10 @@ export class X86Cpu {
   /** Save the current 32-bit CPU context into the active busy TSS. */
   saveTaskStateToTss() {
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("32-bit protected mode is required to save a hardware task", this.ip);
-    if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n) throw new CpuFault("Task-state save with paging enabled is not supported by the physical TSS backend", this.ip);
     const task = this.systemTables.task;
     if (!task.usable || !task.present || !task.busy || task.limit < 0x67) throw new CpuFault("TR does not reference a usable busy 32-bit TSS", this.ip);
     try {
-      const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit });
+      const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit, paging: (this.controlRegisters.get(0) & (1n << 31n)) !== 0n ? this.legacyPaging32 : null });
       return tss.setTaskState({
         eip: this.ip >>> 0, eflags: Number(this.flags & 0xffffffffn),
         registers: { eax: Number(this.getRegister(0, 32)), ecx: Number(this.getRegister(1, 32)),
@@ -112,11 +111,10 @@ export class X86Cpu {
    */
   loadTaskStateFromTss() {
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("32-bit protected mode is required to load a hardware task", this.ip);
-    if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n) throw new CpuFault("Task-state load with paging enabled is not supported by the physical TSS backend", this.ip);
     const task = this.systemTables.task;
     if (!task.usable || !task.present || !task.busy || task.limit < 0x67) throw new CpuFault("TR does not reference a usable busy 32-bit TSS", this.ip);
     try {
-      const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit });
+      const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit, paging: (this.controlRegisters.get(0) & (1n << 31n)) !== 0n ? this.legacyPaging32 : null });
       const state = tss.getTaskState();
       const targetCpl = state.segments.cs & 3;
       if (state.segments.ldt !== this.systemTables.ldtr.selector) throw new Error("TSS LDTR selector must match the loaded LDTR for this bounded restore path");
@@ -138,8 +136,9 @@ export class X86Cpu {
     } catch (error) { throw new CpuFault(error.message, this.ip); }
   }
   /**
-   * Execute the bounded 32-bit JMP-to-TSS task-switch subset. CALL, task
-   * gates, nested tasks and paging-enabled switches are intentionally excluded.
+   * Execute the supported 32-bit protected-mode TSS task-switch paths.
+   * TSS and descriptor-table bases are linear addresses and use the active
+   * legacy paging backend when CR0.PG is set.
    */
   switchTask(selector, { reason = "jmp", returnIp = this.ip } = {}) {
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Hardware task switching requires 32-bit protected mode", this.ip);
@@ -512,7 +511,7 @@ export class X86Cpu {
         throw new CpuFault("I/O privilege check failed (#GP); no usable 32-bit TSS is loaded", start);
       }
       try {
-        const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit });
+        const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit, paging: (this.controlRegisters.get(0) & (1n << 31n)) !== 0n ? this.legacyPaging32 : null });
         if (!tss.allowsIo(port, width)) throw new Error("TSS I/O bitmap denies this port range");
       } catch (error) {
         throw new CpuFault("I/O privilege check failed (#GP): " + error.message, start);
@@ -710,7 +709,7 @@ export class X86Cpu {
         if (!task.usable || !task.present || !task.busy || task.limit < 0x67) {
           throw new Error("Privilege transition requires a present busy 32-bit TSS");
         }
-        const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit });
+        const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit, paging: (this.controlRegisters.get(0) & (1n << 31n)) !== 0n ? this.legacyPaging32 : null });
         const ringStack = tss.getRingStack(targetCpl);
         nextSs = ringStack.ss;
         stackDescriptor = this.segments.prepareStack(nextSs, { targetCpl });
