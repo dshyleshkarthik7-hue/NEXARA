@@ -61,10 +61,13 @@ python3 -c 'import socket,sys; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET
 try: s.accept()
 except TimeoutError: pass' "$host_ip" "$port" &
 server_pid=$!
+ip netns exec "$ns" nft add rule inet nexara_host_validation output counter drop
 sleep 0.2
 if ip netns exec "$ns" timeout 2 python3 -c 'import socket,sys; socket.create_connection((sys.argv[1],int(sys.argv[2])),timeout=1)' "$host_ip" "$port" 2>/dev/null; then
   fail "namespace egress reached host listener despite nftables output drop"
 fi
-echo "PASS: isolated namespace could not establish TCP egress to its veth peer"
+rule_output="$(ip netns exec "$ns" nft list chain inet nexara_host_validation output)"
+echo "$rule_output" | grep -Eq "counter packets [1-9][0-9]*" || fail "egress probe did not hit namespace nftables drop rule"
+echo "PASS: outbound packet was counted by the namespace nftables drop rule"
 echo "PASS: KVM/cgroup/seccomp prerequisites and kernel firewall probe completed"
 echo "NOTE: this does not boot Firecracker or verify jailer-applied seccomp/cgroups inside a guest."
