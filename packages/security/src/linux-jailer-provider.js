@@ -128,7 +128,7 @@ export class LinuxJailerProvider {
 
 async function verifyTrustedExecutable(filePath) {
   const stat = await lstat(filePath);
-  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o022) !== 0) {
+  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o111) === 0 || (stat.mode & 0o022) !== 0) {
     throw new Error("Jailer and Firecracker binaries must be regular files not writable by group or others");
   }
 }
