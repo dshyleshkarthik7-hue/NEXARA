@@ -3,7 +3,6 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { randomBytes, randomUUID } from "node:crypto";
 import os from "node:os";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { VmLeaseAuthority } from "../../../packages/security/src/lease.js";
 import { createMicroVmHost } from "../../../packages/security/src/microvm-host.js";
