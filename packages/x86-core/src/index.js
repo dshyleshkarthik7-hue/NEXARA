@@ -83,6 +83,60 @@ export class X86Cpu {
     return Object.freeze({ vector, errorCode, ip: this.ip });
   }
 
+  /** Save the current 32-bit CPU context into the active busy TSS. */
+  saveTaskStateToTss() {
+    if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("32-bit protected mode is required to save a hardware task", this.ip);
+    if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n) throw new CpuFault("Task-state save with paging enabled is not supported by the physical TSS backend", this.ip);
+    const task = this.systemTables.task;
+    if (!task.usable || !task.present || !task.busy || task.limit < 0x67) throw new CpuFault("TR does not reference a usable busy 32-bit TSS", this.ip);
+    try {
+      const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit });
+      return tss.setTaskState({
+        eip: this.ip >>> 0, eflags: Number(this.flags & 0xffffffffn),
+        registers: { eax: Number(this.getRegister(0, 32)), ecx: Number(this.getRegister(1, 32)),
+          edx: Number(this.getRegister(2, 32)), ebx: Number(this.getRegister(3, 32)),
+          esp: Number(this.getRegister(4, 32)), ebp: Number(this.getRegister(5, 32)),
+          esi: Number(this.getRegister(6, 32)), edi: Number(this.getRegister(7, 32)) },
+        segments: { es: this.segments.registers.es.selector, cs: this.segments.registers.cs.selector,
+          ss: this.segments.registers.ss.selector, ds: this.segments.registers.ds.selector,
+          fs: this.segments.registers.fs.selector, gs: this.segments.registers.gs.selector,
+          ldt: this.systemTables.ldtr.selector }
+      });
+    } catch (error) { throw new CpuFault(error.message, this.ip); }
+  }
+
+  /**
+   * Restore the active TSS register image after validating every segment on a
+   * temporary segment-state object. This is a bounded state primitive, not
+   * an architectural task-switch instruction.
+   */
+  loadTaskStateFromTss() {
+    if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("32-bit protected mode is required to load a hardware task", this.ip);
+    if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n) throw new CpuFault("Task-state load with paging enabled is not supported by the physical TSS backend", this.ip);
+    const task = this.systemTables.task;
+    if (!task.usable || !task.present || !task.busy || task.limit < 0x67) throw new CpuFault("TR does not reference a usable busy 32-bit TSS", this.ip);
+    try {
+      const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit });
+      const state = tss.getTaskState();
+      const targetCpl = state.segments.cs & 3;
+      if (state.segments.ldt !== this.systemTables.ldtr.selector) throw new Error("TSS LDTR selector must match the loaded LDTR for this bounded restore path");
+      if ((state.eflags & 2) === 0) throw new Error("TSS EFLAGS reserved bit 1 must be set");
+      const nextSegments = new X86SegmentState({ gdt: this.gdt, ldt: this.segments.ldt, cpl: targetCpl, longMode: false });
+      nextSegments.installCodeSegment(state.segments.cs);
+      nextSegments.loadStack(state.segments.ss);
+      for (const name of ["ds", "es", "fs", "gs"]) nextSegments.loadData(name, state.segments[name]);
+      const cs = nextSegments.registers.cs.cache;
+      if (BigInt(state.eip) > cs.limit) throw new Error("TSS EIP exceeds the target code-segment limit");
+      // Commit only after TSS bounds, EFLAGS, CS, SS and all data selectors validate.
+      const names = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"];
+      const indices = [0, 1, 2, 3, 4, 5, 6, 7];
+      for (let i = 0; i < names.length; i++) this.setRegister(indices[i], BigInt(state.registers[names[i]]), 32);
+      this.flags = BigInt(state.eflags);
+      this.ip = state.eip;
+      this.segments = nextSegments;
+      return Object.freeze({ ip: this.ip, flags: this.flags, segments: this.segments.snapshot() });
+    } catch (error) { throw new CpuFault(error.message, this.ip); }
+  }
   readControlRegister(index) {
     if (![0, 2, 3, 4].includes(index)) throw new CpuFault("Unsupported control register", this.ip);
     return this.controlRegisters.get(index);
