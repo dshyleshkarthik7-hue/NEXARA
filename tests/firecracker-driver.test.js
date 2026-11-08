@@ -32,7 +32,7 @@ async function fixture(t) {
     });
   });
   await new Promise((resolve, reject) => server.listen(socketPath, error => error ? reject(error) : resolve()));
-  const host = { socketPath, jailRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000, token: "host-token" };
+  const host = { socketPath, jailRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000, network: { tapName: "tap12345678" }, token: "host-token" };
   let stopped = 0;
   const provider = {
     start: async options => { assert.equal(options.requireJailer, true); assert.equal(options.requireCgroups, true); return host; },
@@ -63,7 +63,7 @@ test("Firecracker driver verifies artifacts and configures machine before starti
   const handle = await driver.launch(config);
   assert.equal(handle.started, true);
   assert.deepEqual(f.requests.map(x => x.url), [
-    "/machine-config", "/boot-source", "/drives/rootfs", "/actions"
+    "/machine-config", "/boot-source", "/drives/rootfs", "/network-interfaces/eth0", "/actions"
   ]);
   assert.equal(f.requests[0].body.vcpu_count, 2);
   assert.equal(f.requests[0].body.mem_size_mib, 512);
@@ -71,7 +71,8 @@ test("Firecracker driver verifies artifacts and configures machine before starti
   assert.equal(f.requests[2].body.path_on_host, "/nexara/rootfs.ext4");
   assert.equal((await readFile(path.join(f.jailRoot, "nexara", "vmlinux"))).toString(), "test-kernel-image");
   assert.equal((await readFile(path.join(f.jailRoot, "nexara", "rootfs.ext4"))).toString(), "test-rootfs-image");
-  assert.equal(f.requests[3].body.action_type, "InstanceStart");
+  assert.equal(f.requests[3].body.host_dev_name, "tap12345678");
+  assert.equal(f.requests[4].body.action_type, "InstanceStart");
   await driver.stop(handle);
   assert.equal(f.stopped, 1);
 });
