@@ -303,28 +303,31 @@ export class X86RealModeCpu {
       const mask = width === 8 ? 0xff : MASK16, sign = width === 8 ? 0x80 : 0x8000;
       const bits = width;
       let n = count & 0x1f;
-      if (operation > 7 || ![0,1,4,5,6,7].includes(operation)) {
+      if (operation > 7) {
         this.segmentOverride = null; this.ip = start;
         throw new Error("Unsupported shift/rotate operation /" + operation);
       }
+      // Rotate counts are reduced by the operand width (or width + CF for
+      // through-carry rotates); shift counts are only masked to five bits.
+      if (operation === 0 || operation === 1) n %= bits;
+      else if (operation === 2 || operation === 3) n %= bits + 1;
       if (n !== 0) {
         const original = value;
-        let carry = 0;
+        let carry = (this.flags & CF) ? 1 : 0;
         for (let i = 0; i < n; i++) {
           if (operation === 0) { carry = (value & sign) ? 1 : 0; value = ((value << 1) | carry) & mask; }
           else if (operation === 1) { carry = value & 1; value = (value >>> 1) | (carry ? sign : 0); }
+          else if (operation === 2) { const nextCarry = (value & sign) ? 1 : 0; value = ((value << 1) | carry) & mask; carry = nextCarry; }
+          else if (operation === 3) { const nextCarry = value & 1; value = (value >>> 1) | (carry ? sign : 0); carry = nextCarry; }
           else if (operation === 4 || operation === 6) { carry = (value & sign) ? 1 : 0; value = (value << 1) & mask; }
           else if (operation === 5) { carry = value & 1; value >>>= 1; }
           else { const negative = Boolean(value & sign); carry = value & 1; value = (value >>> 1) | (negative ? sign : 0); }
         }
-        const oldCarry = this.flags & CF;
         let updated = this.flags & ~(CF | OF);
         if (carry) updated |= CF;
-        if (operation === 0 && n === 1 && Boolean(value & sign) !== Boolean(carry)) updated |= OF;
-        else if (operation === 1 && n === 1 && Boolean(value & sign) !== Boolean(value & (sign >>> 1))) updated |= OF;
-        else if ((operation === 4 || operation === 6) && n === 1 && Boolean(value & sign) !== Boolean(carry)) updated |= OF;
+        if ((operation === 0 || operation === 2 || operation === 4 || operation === 6) && n === 1 && Boolean(value & sign) !== Boolean(carry)) updated |= OF;
+        else if ((operation === 1 || operation === 3) && n === 1 && Boolean(value & sign) !== Boolean(value & (sign >>> 1))) updated |= OF;
         else if (operation === 5 && n === 1 && (original & sign)) updated |= OF;
-        else if (operation === 7 && n === 1) updated |= 0;
         if (operation >= 4) {
           const parity = ([0,1,2,3,4,5,6,7].filter(bit => (value >>> bit) & 1).length % 2 === 0);
           updated = (updated & ~(PF | ZF | SF)) | (value === 0 ? ZF : 0) | (value & sign ? SF : 0) | (parity ? PF : 0);
