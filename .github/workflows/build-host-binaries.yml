@@ -1,0 +1,38 @@
+name: Build NEXARA host binaries
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/build-host-binaries.sh"
+      - ".github/workflows/build-host-binaries.yml"
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake pkg-config libssl-dev             musl-tools musl-dev cpio gzip git curl wget perl file python3
+      - name: Build Firecracker, jailer and static BusyBox
+        env:
+          FIRECRACKER_TAG: v1.13.1
+          BUSYBOX_TAG: 1_36_1
+        run: bash scripts/build-host-binaries.sh
+      - name: Build minimal guest initramfs
+        run: |
+          bash scripts/build-firecracker-guest-initramfs.sh             "$GITHUB_WORKSPACE/dist/host-binaries/busybox"             "$GITHUB_WORKSPACE/dist/host-binaries/nexara-guest-initramfs.cpio.gz"
+          cd dist/host-binaries
+          sha256sum nexara-guest-initramfs.cpio.gz >> SHA256SUMS
+      - name: Upload binaries, manifests and initramfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexara-firecracker-busybox-linux-x86_64
+          path: dist/host-binaries/
+          if-no-files-found: error
+          retention-days: 30
