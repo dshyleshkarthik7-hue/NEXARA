@@ -400,7 +400,13 @@ test("task-switch commit failure restores CPU state, TSS images and descriptor b
     }
     return originalWrite(address, bytes);
   };
-  assert.throws(() => cpu.switchTask(0x30, { reason: "jmp", returnIp: 0x707 }), /Task switch failed.*injected descriptor commit failure/);
+  const taskFault = assert.throws(
+    () => cpu.switchTask(0x30, { reason: "jmp", returnIp: 0x707 }),
+    /Task switch failed.*injected descriptor commit failure/
+  );
+  assert.equal(taskFault.vector, 13);
+  assert.equal(taskFault.errorCode, 0);
+  assert.match(taskFault.cause?.message ?? "", /injected descriptor commit failure/);
   memory.write = originalWrite;
   assert.equal(injected, true);
   const after = cpu.saveState();
