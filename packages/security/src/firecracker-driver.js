@@ -38,6 +38,14 @@ export class FirecrackerDriver {
       || config.network?.defaultDeny !== true) {
       throw new TypeError("Invalid microVM launch configuration");
     }
+    if (config.rootfsDevice !== undefined) {
+      const disk = config.rootfsDevice;
+      if (!disk || typeof disk.materializeRaw !== "function" || !Number.isSafeInteger(disk.sectors)
+        || disk.sectors < 1 || !Number.isSafeInteger(config.quotas.diskMiB)
+        || disk.sectors * 512 > config.quotas.diskMiB * 1024 * 1024) {
+        throw new TypeError("Invalid broker-managed root disk or disk quota");
+      }
+    }
     const manifest = await this.#resolveImage(config.imageDigest);
     if (!manifest || manifest.digest !== config.imageDigest
       || typeof manifest.kernelPath !== "string" || !path.isAbsolute(manifest.kernelPath)
@@ -85,10 +93,6 @@ export class FirecrackerDriver {
       await copyFile(manifest.kernelPath, kernelTarget);
       if (config.rootfsDevice !== undefined) {
         const disk = config.rootfsDevice;
-        if (!disk || typeof disk.materializeRaw !== "function" || !Number.isSafeInteger(disk.sectors)
-          || disk.sectors < 1 || disk.sectors * 512 > config.quotas.diskMiB * 1024 * 1024) {
-          throw new TypeError("Invalid broker-managed root disk or disk quota");
-        }
         const materialized = await disk.materializeRaw(rootfsTarget);
         if (!materialized || materialized.path !== rootfsTarget || materialized.format !== "raw"
           || materialized.byteLength !== disk.sectors * 512) {
