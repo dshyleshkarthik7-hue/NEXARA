@@ -935,11 +935,20 @@ export class X86Cpu {
       const offset = this.#fetchUnsigned(operand16 ? 2 : 4);
       const selector = Number(this.#fetchUnsigned(2));
       try {
-        const cache = this.segments.installCodeSegment(selector);
-        if (offset > cache.limit) throw new Error("Far-jump target exceeds CS limit");
-        const linear = offset + cache.base;
-        if (linear >= BigInt(this.memory.byteLength)) throw new Error("Far-jump target exceeds guest memory");
-        this.ip = Number(offset);
+        if ((selector & 4) === 0) {
+          const descriptor = this.gdt.readSegment(selector, { cpl: this.segments.cpl });
+          if (descriptor?.system) {
+            this.switchTask(selector, { reason: "jmp", returnIp: this.ip });
+          } else {
+            const cache = this.segments.installCodeSegment(selector);
+            if (offset > cache.limit) throw new Error("Far-jump target exceeds CS limit");
+            const linear = offset + cache.base;
+            if (linear >= BigInt(this.memory.byteLength)) throw new Error("Far-jump target exceeds guest memory");
+            this.ip = Number(offset);
+          }
+        } else {
+          throw new Error("Far JMP through an LDT selector is unsupported for task switching");
+        }
       } catch (error) { throw new CpuFault(error.message, start); }
     } else if (opcode === 0x8e || opcode === 0x8c) {
       const decoded = this.#decodeModRM(rex, addressWidth);
