@@ -45,3 +45,18 @@ The registry reopens overlays only after validating private file metadata, geome
 - Exercise this on a Linux host with KVM, Firecracker, jailer and the configured network provider before production use.
 
 The server supports this bootstrap when `NEXARA_EXECUTION_BACKEND=microvm` and exposes authenticated `/api/vms` create/list/stop routes. The separate terminal/PTY API remains a distinct backend and is not silently substituted for Firecracker.
+
+
+## Real Linux/KVM host validation
+
+A privileged host check is available at `scripts/host-validation.sh`. It verifies Linux root execution, readable/writable `/dev/kvm`, cgroup-v2 CPU/memory/PID controllers, kernel seccomp availability, trusted executable permissions for Firecracker and jailer, and a temporary network namespace whose nftables output-drop counter must increment when an outbound TCP connection is attempted. The probe removes its temporary namespace and veth pair on exit.
+
+Run it only on a disposable or dedicated Linux host configured for NEXARA:
+
+```sh
+sudo env FIRECRACKER_BIN=/usr/bin/firecracker JAILER_BIN=/usr/bin/jailer bash scripts/host-validation.sh
+```
+
+The manually triggered GitHub Actions workflow `.github/workflows/host-validation.yml` requires a dedicated self-hosted runner labeled `self-hosted, linux, x64, kvm, nexara-host-validation`, with passwordless sudo and repository variables `FIRECRACKER_BIN` and `JAILER_BIN` set to trusted absolute executable paths. Do not attach this label to a shared or untrusted runner. The workflow is intentionally `workflow_dispatch` only; it does not execute privileged host operations for pull requests.
+
+This preflight is not a Firecracker guest boot test. It does not establish that the configured jailer actually installs the expected seccomp filter, cgroup limits, or guest device isolation. Those require a separate disposable KVM host test that launches the configured jailer and Firecracker process, inspects the live process/cgroup/network state, boots a known test guest, performs guest disk writes, and validates persistence after a host restart. Do not infer those results from this preflight passing.
