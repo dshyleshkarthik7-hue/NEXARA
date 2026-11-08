@@ -152,27 +152,37 @@ export class X86RealModeCpu {
   #stringInstruction(opcode, repeat) {
     const width = (opcode & 1) ? 2 : 1;
     const delta = (this.flags & DF) ? -width : width;
-    const count = repeat ? this.cx : 1;
-    for (let i = 0; i < count; i++) {
+    const comparing = opcode === 0xa6 || opcode === 0xa7 || opcode === 0xae || opcode === 0xaf;
+    if (![0xa4,0xa5,0xa6,0xa7,0xaa,0xab,0xac,0xad,0xae,0xaf].includes(opcode)) return false;
+    let remaining = repeat === null ? 1 : this.cx;
+    while (remaining > 0) {
       if (opcode === 0xa4 || opcode === 0xa5) {
         const value = width === 1 ? this.#read8(this.segmentOverride ?? this.ds, this.si) : this.#read16(this.segmentOverride ?? this.ds, this.si);
-        if (width === 1) this.#write8(this.es, this.di, value);
-        else this.#write16(this.es, this.di, value);
-        this.si = (this.si + delta) & MASK16;
-        this.di = (this.di + delta) & MASK16;
+        if (width === 1) this.#write8(this.es, this.di, value); else this.#write16(this.es, this.di, value);
+        this.si = (this.si + delta) & MASK16; this.di = (this.di + delta) & MASK16;
       } else if (opcode === 0xaa || opcode === 0xab) {
-        if (width === 1) this.#write8(this.es, this.di, this.ax & 0xff);
-        else this.#write16(this.es, this.di, this.ax);
+        if (width === 1) this.#write8(this.es, this.di, this.ax & 0xff); else this.#write16(this.es, this.di, this.ax);
         this.di = (this.di + delta) & MASK16;
-      } else if (opcode === 0xac || opcode === 0xad) {
-        if (width === 1) this.#setReg8(0, this.#read8(this.segmentOverride ?? this.ds, this.si));
-        else this.ax = this.#read16(this.segmentOverride ?? this.ds, this.si);
+      } else if (opcode === 0xac || opcode === 0xad || opcode === 0xa6 || opcode === 0xa7 || opcode === 0xae || opcode === 0xaf) {
+        if (width === 1) this.#setReg8(0, this.#read8(this.segmentOverride ?? this.ds, this.si)); else this.ax = this.#read16(this.segmentOverride ?? this.ds, this.si);
         this.si = (this.si + delta) & MASK16;
+      } else if (opcode === 0xa6 || opcode === 0xa7) {
+        const left = width === 1 ? this.#read8(this.segmentOverride ?? this.ds, this.si) : this.#read16(this.segmentOverride ?? this.ds, this.si);
+        const right = width === 1 ? this.#read8(this.es, this.di) : this.#read16(this.es, this.di);
+        this.#setSubFlags(left, right, width * 8);
+        this.si = (this.si + delta) & MASK16; this.di = (this.di + delta) & MASK16;
       } else {
-        return false;
+        const value = width === 1 ? this.#read8(this.es, this.di) : this.#read16(this.es, this.di);
+        this.#setSubFlags(width === 1 ? this.ax & 0xff : this.ax, value, width * 8);
+        this.di = (this.di + delta) & MASK16;
+      }
+      remaining--;
+      if (repeat !== null) this.cx = remaining & MASK16;
+      if (comparing && repeat !== null) {
+        const equal = Boolean(this.flags & ZF);
+        if ((repeat === 0xf3 && !equal) || (repeat === 0xf2 && equal)) break;
       }
     }
-    if (repeat) this.cx = 0;
     return true;
   }
 
@@ -183,10 +193,10 @@ export class X86RealModeCpu {
     if (this.halted) return Object.freeze({ state: "halted", ip: this.ip });
     const start = this.ip;
     let opcode = this.#fetch8();
-    let repeat = false;
+    let repeat = null;
     this.segmentOverride = null;
     while ([0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e].includes(opcode)) {
-      if (opcode === 0xf2 || opcode === 0xf3) repeat = true;
+      if (opcode === 0xf2 || opcode === 0xf3) repeat = opcode;
       else this.segmentOverride = ({ 0x26: this.es, 0x2e: this.cs, 0x36: this.ss, 0x3e: this.ds })[opcode];
       opcode = this.#fetch8();
     }
