@@ -175,6 +175,7 @@ if (executionBackend === "microvm") {
 }
 
 app.post("/api/sessions", async (request, reply) => {
+  if (executionBackend === "microvm") return reply.code(503).send({ error: "PTY sessions are disabled when the Firecracker microVM backend is selected." });
   if (!sandboxEnabled && !allowUnsandboxedHostPty) return reply.code(503).send({ error: "No execution backend configured. Configure NEXARA_SANDBOX_IMAGE and a sandbox runtime; unsandboxed host PTY is disabled by default." });
   if (!registry.canCreate(request.ip)) return reply.code(429).send({ error: "Session creation limit or capacity reached" });
   const shell = process.env.NEXARA_SHELL || process.env.SHELL || (process.platform === "win32" ? "powershell.exe" : "/bin/sh");
