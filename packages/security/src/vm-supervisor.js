@@ -32,7 +32,7 @@ export class VmSupervisor {
       now: this.#clock(), subject, imageDigest
     });
     const id = randomUUID();
-    const record = { id, state: "starting", leaseId: lease.id, subject: lease.subject, imageDigest: lease.imageDigest, handle: null };
+    const record = { id, state: "starting", leaseId: lease.id, subject: lease.subject, imageDigest: lease.imageDigest, envelope, handle: null };
     this.#instances.set(id, record);
     try {
       const handle = await this.#driver.launch(Object.freeze({
@@ -63,12 +63,11 @@ export class VmSupervisor {
     if (!record) return null;
     if (record.state === "running") {
       try {
-        this.#authority.verify({ payload: this.#driverLeasePayload(record), signature: this.#driverLeaseSignature(record) }, {
+        this.#authority.verify(record.envelope, {
           now: this.#clock(), subject: record.subject, imageDigest: record.imageDigest
         });
       } catch {
-        // A record without retained lease material is not returned as healthy.
-        return this.#publicRecord({ ...record, state: "lease-unavailable" });
+        return this.#publicRecord({ ...record, state: "lease-expired-or-invalid" });
       }
     }
     return this.#publicRecord(record);
@@ -112,9 +111,4 @@ export class VmSupervisor {
     });
   }
 
-  // Lease envelopes are retained separately by the driver in production.
-  // Until a driver exposes an authenticated lease reference, get() reports
-  // lifecycle state only; authorization must be performed by the broker.
-  #driverLeasePayload() { throw new Error("Lease envelope is not retained by supervisor"); }
-  #driverLeaseSignature() { throw new Error("Lease envelope is not retained by supervisor"); }
-}
+} 
