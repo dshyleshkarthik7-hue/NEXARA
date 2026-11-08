@@ -18,7 +18,7 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   let invoked;
   let released = 0;
   const networkProvider = {
-    provision: async () => ({ netnsPath: "/run/netns/nexara-test", tapName: "taptest", release: async () => { released++; } }),
+    provision: async () => ({ netnsPath: "/run/netns/nexara-test", tapName: "taptest", release: async () => {} }),
     release: async handle => { released++; if (released === 1) throw new Error("namespace busy"); await handle.release(); }
   };
   const spawn = (command, args, options) => {
