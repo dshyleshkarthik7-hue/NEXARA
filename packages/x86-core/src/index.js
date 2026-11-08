@@ -172,6 +172,9 @@ export class X86Cpu {
       nextSegments.loadStack(incoming.segments.ss);
       for (const name of ["es", "ds", "fs", "gs"]) nextSegments.loadData(name, incoming.segments[name]);
       if (BigInt(incoming.eip) > nextSegments.registers.cs.cache.limit) throw new Error("Incoming TSS EIP exceeds code-segment limit");
+      const targetAccessAddress = this.gdt.base + BigInt((selector >>> 3) * 8 + 5);
+      const currentAccessAddress = this.gdt.base + BigInt((current.selector >>> 3) * 8 + 5);
+      if (targetAccessAddress >= BigInt(this.memory.byteLength) || currentAccessAddress >= BigInt(this.memory.byteLength)) throw new Error("TSS descriptor access byte exceeds guest memory");
       const oldTss = new X86Tss32(this.memory, { base: current.base, limit: current.limit });
       oldTss.setTaskState({
         eip: returnIp, eflags: Number(this.flags & 0xffffffffn),
@@ -180,9 +183,6 @@ export class X86Cpu {
         segments: { es: this.segments.registers.es.selector, cs: this.segments.registers.cs.selector, ss: this.segments.registers.ss.selector,
           ds: this.segments.registers.ds.selector, fs: this.segments.registers.fs.selector, gs: this.segments.registers.gs.selector, ldt: this.systemTables.ldtr.selector }
       });
-      const targetAccessAddress = this.gdt.base + BigInt((selector >>> 3) * 8 + 5);
-      const currentAccessAddress = this.gdt.base + BigInt((current.selector >>> 3) * 8 + 5);
-      if (targetAccessAddress >= BigInt(this.memory.byteLength) || currentAccessAddress >= BigInt(this.memory.byteLength)) throw new Error("TSS descriptor access byte exceeds guest memory");
       // Descriptor writes and the CPU commit occur only after the incoming image validates.
       const targetAccess = targetDescriptor.raw[5] | 2;
       const currentAccess = currentDescriptor.raw[5] & ~2;
