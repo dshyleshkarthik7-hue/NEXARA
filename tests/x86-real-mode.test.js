@@ -74,3 +74,20 @@ test("unsupported real-mode opcode faults without consuming its byte", () => {
   assert.equal(cpu.ip, 0x7c00);
   assert.equal(cpu.instructionsExecuted, 0);
 });
+
+test("real-mode INC and DEC preserve carry and set auxiliary/overflow flags", () => {
+  const { cpu: increment } = cpuFor([0xb8,0xff,0x7f,0x40,0xf4]);
+  increment.flags |= 1;
+  increment.run({ maxInstructions: 2 });
+  assert.equal(increment.ax, 0x8000);
+  assert.equal(increment.flags & 1, 1);
+  assert.equal(increment.flags & 0x800, 0x800);
+  assert.equal(increment.flags & 0x10, 0x10);
+  assert.equal(increment.flags & 0x80, 0x80);
+
+  const { cpu: decrement } = cpuFor([0xb8,0x00,0x80,0x48,0xf4]);
+  decrement.run({ maxInstructions: 2 });
+  assert.equal(decrement.ax, 0x7fff);
+  assert.equal(decrement.flags & 0x800, 0x800);
+  assert.equal(decrement.flags & 0x10, 0x10);
+});
