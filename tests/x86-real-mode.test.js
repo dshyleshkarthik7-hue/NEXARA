@@ -91,3 +91,18 @@ test("real-mode INC and DEC preserve carry and set auxiliary/overflow flags", ()
   assert.equal(decrement.flags & 0x800, 0x800);
   assert.equal(decrement.flags & 0x10, 0x10);
 });
+
+test("real-mode INT and IRET use the IVT and restore FLAGS, CS, IP and SP", () => {
+  const { memory, cpu } = cpuFor([0xcd,0x30,0xf4]);
+  memory.write(0x30 * 4, Uint8Array.of(0x00,0x80,0x00,0x00));
+  memory.write(0x8000, Uint8Array.of(0xb8,0xef,0xbe,0xcf)); // MOV AX,BEEFh; IRET
+  cpu.flags |= 0x300;
+  const result = cpu.run({ maxInstructions: 8 });
+  assert.equal(result.state, "halted");
+  assert.equal(result.instructionsExecuted, 4);
+  assert.equal(cpu.ax, 0xbeef);
+  assert.equal(cpu.cs, 0);
+  assert.equal(cpu.ip, 0x7c03);
+  assert.equal(cpu.sp, 0x7c00);
+  assert.equal(cpu.flags & 0x300, 0x300);
+});
