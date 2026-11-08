@@ -64,3 +64,12 @@ test("two-boot evidence verifier rejects missing persistence and unchanged firew
   ], { encoding: "utf8" });
   assert.notEqual(unchangedCounter.status, 0);
 });
+
+test("two-boot runner never uses host-wide Firecracker process cleanup", async () => {
+  const source = await (await import("node:fs/promises")).readFile("scripts/run-firecracker-two-boot.sh", "utf8");
+  assert.doesNotMatch(source, /pgrep -x firecracker/);
+  assert.doesNotMatch(source, /pkill .*firecracker/);
+  assert.match(source, /pgrep -P "\\$jailer_pid" -x firecracker/);
+  assert.match(source, /ACTIVE_FIRECRACKER_PID/);
+  assert.match(source, /ACTIVE_JAILER_PID/);
+});
