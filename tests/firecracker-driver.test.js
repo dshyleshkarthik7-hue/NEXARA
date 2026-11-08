@@ -101,7 +101,7 @@ test("Firecracker driver tears down jailed worker when API configuration fails",
       await new Promise(resolve => server.close(resolve));
       await new Promise(resolve => f.provider._close?.(resolve) ?? resolve());
     };
-    return { socketPath: f.socketPath + ".bad", stop: async () => {} };
+    return { socketPath: f.socketPath + ".bad", jailRoot: f.jailRoot, stop: async () => {} };
   };
   const driver = new FirecrackerDriver({ provider: f.provider, resolveImage: f.resolveImage });
   await assert.rejects(() => driver.launch(config), /API request failed/);
