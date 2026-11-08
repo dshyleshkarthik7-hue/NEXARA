@@ -29,7 +29,7 @@ NEXARA currently combines a browser editor/workspace, a server session gateway, 
 - Native build prerequisites for `node-pty`
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
@@ -94,7 +94,9 @@ The current build and KVM workflows provide repeatable gates, not a certificatio
 
 - `HOST`: bind address (default `127.0.0.1`).
 - `PORT`: HTTP/WebSocket port (default `8787`).
-- `ALLOWED_ORIGINS`: comma-separated browser origins.
+- `ALLOWED_ORIGINS`: comma-separated browser origins (required for browser session creation).
+- `NEXARA_ALLOWED_HOSTS`: comma-separated exact Host header values, including ports; defaults to loopback hosts for the configured port.
+- `TRUST_PROXY`: `false` by default; set to `true` only behind a trusted proxy, or provide a comma-separated list of trusted proxy addresses/CIDRs.
 - `NEXARA_MAX_SESSIONS`: concurrent PTY session ceiling.
 - `NEXARA_MAX_SESSIONS_PER_CLIENT`: active sessions per client ceiling.
 - `NEXARA_SESSION_CREATE_LIMIT`: session creation attempts per client per minute.
