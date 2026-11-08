@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { GuestMemory, PcAtInterruptFabric } from "../packages/runtime/src/index.js";
+import { GuestMemory, PcAtInterruptFabric, AtaPioDevice, MemoryBlockDevice } from "../packages/runtime/src/index.js";
 
 test("PC/AT fabric routes PIT channel zero through PIC to CPU IRQ queue", () => {
   const fabric = new PcAtInterruptFabric();
@@ -27,4 +27,23 @@ test("PC/AT fabric snapshots restore PIC and PIT state", () => {
   assert.equal(restored.pit.counter, fabric.pit.counter);
   assert.deepEqual(restored.pic.snapshot(), fabric.pic.snapshot());
   assert.throws(() => restored.restore({ ...snapshot, format: "invalid" }), /Invalid PC fabric snapshot/);
+});
+
+test("PC/AT fabric checkpoint preserves an in-flight ATA PIO transfer", () => {
+  const disk = new MemoryBlockDevice({ sectors: 2 });
+  disk.writeSectors(0, new Uint8Array(512).fill(0x7c));
+  const fabric = new PcAtInterruptFabric({ ata: new AtaPioDevice({ disk }) });
+  fabric.ioWrite(0x1f2, 1);
+  fabric.ioWrite(0x1f3, 0);
+  fabric.ioWrite(0x1f4, 0);
+  fabric.ioWrite(0x1f5, 0);
+  fabric.ioWrite(0x1f6, 0xe0);
+  fabric.ioWrite(0x1f7, 0x20);
+  assert.equal(fabric.ioRead(0x1f0, 16), 0x7c7cn);
+  const snapshot = fabric.snapshot();
+  const expected = fabric.ioRead(0x1f0, 16);
+  const restored = new PcAtInterruptFabric({ ata: new AtaPioDevice({ disk }) });
+  restored.restore(snapshot);
+  assert.equal(restored.ioRead(0x1f0, 16), expected);
+  assert.throws(() => new PcAtInterruptFabric().restore(snapshot), /device configuration mismatch/);
 });
