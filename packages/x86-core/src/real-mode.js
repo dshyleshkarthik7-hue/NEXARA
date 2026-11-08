@@ -259,6 +259,8 @@ export class X86RealModeCpu {
       const immediate = opcode === 0x80 ? this.#fetch8() :
         opcode === 0x83 ? ((this.#fetch8() << 24) >> 24) : this.#fetch16();
       if (operation !== 0 && operation !== 5 && operation !== 7) {
+        this.segmentOverride = null;
+        this.ip = start;
         throw new Error("Unsupported immediate arithmetic group operation /" + operation);
       }
       const left = operand.read();
