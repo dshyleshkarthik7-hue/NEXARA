@@ -288,6 +288,7 @@ test("X86Tss32 reads and writes linear TSS fields through legacy 32-bit paging",
   const paging = new X86LegacyPaging32(memory);
   const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
   put32(0x1000, 0x2003);
+  put32(0x2000, 0x0003); // identity-map code at 0x700
   put32(0x2000 + 3 * 4, 0x5003); // linear page 3 -> physical page 5
   paging.loadCr3(0x1000);
   const tss = new X86Tss32(memory, { base: 0x3000, limit: 0x67, paging });
@@ -329,6 +330,7 @@ test("32-bit far JMP task switch reads TSS images through the active page tables
     registers: { eax: 0x11, ecx: 0x22, edx: 0x33, ebx: 0x44, esp: 0x1f00, ebp: 0x66, esi: 0x77, edi: 0x88 },
     segments: { es: 0x10, cs: 0x08, ss: 0x10, ds: 0x10, fs: 0x10, gs: 0x10, ldt: 0 }
   });
+  newTss.cr3 = 0x1000;
   memory.write(0x700, Uint8Array.of(0xea, 0, 8, 0, 0, 0x30, 0));
   cpu.step();
   assert.equal(cpu.ip, 0x750);
