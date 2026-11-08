@@ -93,3 +93,5 @@ export class GuestMemory {
 }
 
 export { Pic8259, Pit8253, PcAtInterruptFabric } from "./devices.js";
+
+export { MemoryBlockDevice, BLOCK_SECTOR_SIZE } from "./block-device.js";
