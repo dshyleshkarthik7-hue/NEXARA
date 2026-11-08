@@ -364,3 +364,46 @@ test("paged TSS task-switch faults update CR2 with the failing linear address", 
   assert.equal(cpu.readControlRegister(2), 0x4028n);
   assert.equal(cpu.systemTables.task.selector, 0x28);
 });
+
+
+test("task-switch commit failure restores CPU state, TSS images and descriptor busy bits", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x700 });
+  const gdtBase = 0x100;
+  const putDescriptor = (index, access, base) => memory.write(gdtBase + index * 8,
+    Uint8Array.from([0x67,0,base & 255,(base >>> 8) & 255,(base >>> 16) & 255,access,0,(base >>> 24) & 255]));
+  putDescriptor(1, 0x9a, 0); putDescriptor(2, 0x92, 0);
+  putDescriptor(5, 0x8b, 0x500); // current busy TSS
+  putDescriptor(6, 0x89, 0x600); // target available TSS
+  cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
+  cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  new X86Tss32(memory, { base: 0x600, limit: 0x67 }).setTaskState({
+    eip: 0x750, eflags: 0x202,
+    registers: { eax: 1, ecx: 2, edx: 3, ebx: 4, esp: 0x1f00, ebp: 6, esi: 7, edi: 8 },
+    segments: { es: 0x10, cs: 0x08, ss: 0x10, ds: 0x10, fs: 0x10, gs: 0x10, ldt: 0 }
+  });
+  cpu.setRegister(0, 0xaabb, 32);
+  cpu.setRegister(4, 0x1e00, 32);
+  cpu.flags = 0x202n;
+  const before = cpu.saveState();
+  const originalWrite = memory.write.bind(memory);
+  let injected = false;
+  memory.write = (address, bytes) => {
+    if (!injected && address === gdtBase + 6 * 8 + 5) {
+      injected = true;
+      throw new Error("injected descriptor commit failure");
+    }
+    return originalWrite(address, bytes);
+  };
+  assert.throws(() => cpu.switchTask(0x30, { reason: "jmp", returnIp: 0x707 }), /Task switch failed.*injected descriptor commit failure/);
+  memory.write = originalWrite;
+  assert.equal(injected, true);
+  const after = cpu.saveState();
+  assert.deepEqual(after.memory, before.memory);
+  assert.deepEqual(after.registers, before.registers);
+  assert.equal(after.ip, before.ip);
+  assert.equal(after.flags, before.flags);
+  assert.equal(cpu.systemTables.task.selector, 0x28);
+  assert.equal(memory.read(gdtBase + 6 * 8 + 5, 1)[0] & 0x0f, 0x09);
+});
