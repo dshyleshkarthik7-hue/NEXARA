@@ -2,6 +2,7 @@ import { constants as fsConstants } from "node:fs";
 import { mkdir, lstat, open, unlink, copyFile, chmod } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { BLOCK_SECTOR_SIZE } from "./block-device.js";
 
 const MAGIC = Buffer.from("NEXARACOW1");
@@ -150,7 +151,8 @@ export class CopyOnWriteBlockDevice {
         if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) throw new Error("Snapshot must be a private regular file");
         await snapshot.sync();
       } finally { await snapshot.close(); }
-      return Object.freeze({ path: snapshotPath, sectors: this.sectors, baseDigest: this.baseDigest, format: "nexara-cow-v1" });
+      const snapshotDigest = await digestFile(snapshotPath);
+      return Object.freeze({ path: snapshotPath, sectors: this.sectors, baseDigest: this.baseDigest, snapshotDigest, format: "nexara-cow-v1" });
     } catch (error) {
       await unlink(snapshotPath).catch(() => {});
       throw error;
@@ -158,12 +160,14 @@ export class CopyOnWriteBlockDevice {
   }
 
   /** Restore a snapshot into a new VM overlay; never overwrites an existing overlay. */
-  static async restore({ snapshotPath, directory, vmId, sectors, baseDigest, baseDevice } = {}) {
+  static async restore({ snapshotPath, directory, vmId, sectors, baseDigest, baseDevice, expectedSnapshotDigest } = {}) {
     if (typeof snapshotPath !== "string" || !path.isAbsolute(snapshotPath)) throw new TypeError("Snapshot path must be absolute");
+    if (typeof expectedSnapshotDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(expectedSnapshotDigest)) throw new TypeError("Expected snapshot digest is required");
     const source = await lstat(snapshotPath);
     if (!source.isFile() || source.isSymbolicLink() || source.nlink !== 1 || (source.mode & 0o077) !== 0) {
       throw new Error("Snapshot must be a private regular file with one link and mode 0600");
     }
+    if (await digestFile(snapshotPath) !== expectedSnapshotDigest) throw new Error("Snapshot integrity digest mismatch");
     const targetDirectory = await lstat(directory);
     if (!targetDirectory.isDirectory() || targetDirectory.isSymbolicLink() || (targetDirectory.mode & 0o077) !== 0) {
       throw new Error("Restore target must be a private directory");
@@ -258,6 +262,12 @@ async function writeAll(handle, buffer, position) {
     if (result.bytesWritten === 0) throw new Error("Copy-on-write overlay write made no progress");
     offset += result.bytesWritten;
   }
+}
+
+async function digestFile(filePath) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk);
+  return "sha256:" + hash.digest("hex");
 }
 
 async function digestDevice(device, sectors) {
