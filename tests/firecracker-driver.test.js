@@ -165,13 +165,14 @@ test("Firecracker driver rejects broker root disks exceeding lease quota", async
 
 test("Firecracker preserves staged guest disk when COW write-back fails", async t => {
   const f = await fixture(t);
+  let failImport = true;
   const rootfsDevice = {
     sectors: 2048,
     materializeRaw: async target => {
       await writeFile(target, Buffer.alloc(2048 * 512, 0x5a), { flag: "wx", mode: 0o600 });
       return { path: target, sectors: 2048, byteLength: 2048 * 512, format: "raw" };
     },
-    importRaw: async () => { throw new Error("overlay unavailable"); }
+    importRaw: async () => { if (failImport) throw new Error("overlay unavailable"); return { changedSectors: 3 }; }
   };
   const driver = new FirecrackerDriver({ provider: f.provider, resolveImage: f.resolveImage });
   const handle = await driver.launch({ ...config, rootfsDevice });
@@ -179,4 +180,9 @@ test("Firecracker preserves staged guest disk when COW write-back fails", async 
   await assert.rejects(() => driver.stop(handle), /overlay unavailable/);
   assert.equal(handle.writebackPending, true);
   assert.equal((await readFile(staged)).length, 2048 * 512, "guest changes must remain recoverable");
+  failImport = false;
+  const result = await driver.retryWriteback(handle);
+  assert.equal(result.changedSectors, 3);
+  assert.equal(handle.writebackPending, false);
+  await assert.rejects(() => readFile(staged), { code: "ENOENT" });
 });
