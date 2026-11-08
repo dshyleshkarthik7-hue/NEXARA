@@ -180,4 +180,23 @@ export class AtaPioDevice {
       transferKind: this.transferKind
     });
   }
+
+  restore(state) {
+    const byteFields = ["features", "error", "sectorCount", "lbaLow", "lbaMid", "lbaHigh", "driveHead", "status", "command"];
+    if (!state || state.format !== "nexara-ata-pio-v1"
+      || byteFields.some(key => !Number.isInteger(state[key]) || state[key] < 0 || state[key] > 255)
+      || !Number.isInteger(state.transferIndex) || state.transferIndex < 0 || state.transferIndex > 256
+      || !(state.transfer === null || (state.transfer instanceof Uint16Array && state.transfer.length === 256))
+      || !([null, "identify", "read", "write"].includes(state.transferKind))
+      || ((state.transfer === null) !== (state.transferKind === null))
+      || (state.transfer === null && state.transferIndex !== 0)) {
+      throw new TypeError("Invalid ATA PIO snapshot");
+    }
+    this.features = state.features; this.error = state.error; this.sectorCount = state.sectorCount;
+    this.lbaLow = state.lbaLow; this.lbaMid = state.lbaMid; this.lbaHigh = state.lbaHigh;
+    this.driveHead = state.driveHead; this.status = state.status; this.command = state.command;
+    this.transfer = state.transfer?.slice() ?? null;
+    this.transferIndex = state.transferIndex; this.transferKind = state.transferKind;
+    return this.snapshot();
+  }
 }
