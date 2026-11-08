@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, mkdir, copyFile, chmod } from "node:fs/promises";
+import { lstat, mkdir, copyFile, chmod, chown } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
@@ -69,7 +69,8 @@ export class FirecrackerDriver {
     const handle = { host, started: false, id: config.id };
     try {
       await waitForApi(host.socketPath, this.#timeoutMs);
-      if (typeof host.jailRoot !== "string" || !path.isAbsolute(host.jailRoot)) {
+      if (typeof host.jailRoot !== "string" || !path.isAbsolute(host.jailRoot)
+        || !Number.isSafeInteger(host.uid) || !Number.isSafeInteger(host.gid)) {
         throw new Error("Host provider did not expose the Firecracker jail root for image staging");
       }
       const rootStat = await lstat(host.jailRoot);
@@ -80,8 +81,9 @@ export class FirecrackerDriver {
       const rootfsTarget = path.join(artifactDir, "rootfs.ext4");
       await copyFile(manifest.kernelPath, kernelTarget);
       await copyFile(manifest.rootfsPath, rootfsTarget);
-      await chmod(kernelTarget, 0o644);
-      await chmod(rootfsTarget, 0o644);
+      await chmod(kernelTarget, 0o444);
+      await chmod(rootfsTarget, manifest.readOnlyRootfs === true ? 0o444 : 0o660);
+      await chown(rootfsTarget, host.uid, host.gid);
       await apiRequest(host.socketPath, "PUT", "/machine-config", {
         vcpu_count: Math.max(1, Math.ceil(config.quotas.cpuMillis / 1000)),
         mem_size_mib: config.quotas.memoryMiB,
