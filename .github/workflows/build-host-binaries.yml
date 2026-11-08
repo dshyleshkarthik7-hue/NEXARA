@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang cmake pkg-config libssl-dev \
-            musl-tools musl-dev cpio gzip git curl wget perl file python3 \
+            musl-tools musl-dev libseccomp-dev cpio gzip git curl wget perl file python3 \
             bc bison flex xz-utils libelf-dev libncurses-dev
       - name: Build Firecracker, jailer and static BusyBox
         env:
