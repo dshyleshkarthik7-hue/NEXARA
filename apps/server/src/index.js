@@ -14,9 +14,21 @@ import { isClientMessage } from "../../../packages/protocol/src/index.js";
 import { SessionRegistry } from "./session-registry.js";
 import { buildSandboxArgs, sandboxCapabilities } from "./container-policy.js";
 
-const app = Fastify({ logger: true, bodyLimit: 16 * 1024 });
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || "127.0.0.1";
+const proxySetting = process.env.TRUST_PROXY || "";
+const trustProxy = proxySetting === "true" ? true
+  : proxySetting === "false" || !proxySetting ? false
+    : proxySetting.split(",").map(value => value.trim()).filter(Boolean);
+const app = Fastify({
+  logger: {
+    // WebSocket credentials currently arrive as a query parameter for browser
+    // compatibility. Never emit request URLs (which may contain that token).
+    redact: { paths: ["req.url"], censor: "[REDACTED]" }
+  },
+  trustProxy,
+  bodyLimit: 16 * 1024
+});
 const allowUnsandboxedHostPty = process.env.NEXARA_ALLOW_UNSANDBOXED_HOST_PTY === "true";
 const sandboxImage = process.env.NEXARA_SANDBOX_IMAGE || "";
 const sandboxRuntime = process.env.NEXARA_SANDBOX_RUNTIME || "runsc";
@@ -25,6 +37,9 @@ if (allowUnsandboxedHostPty && !sandboxEnabled && !["127.0.0.1", "localhost", ":
   throw new Error("Refusing to expose unsandboxed host PTY beyond loopback; deploy an isolated VM backend instead");
 }
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || "http://localhost:5173").split(",").map(s => s.trim()).filter(Boolean));
+const allowedHosts = new Set((process.env.NEXARA_ALLOWED_HOSTS
+  || `localhost:${port},127.0.0.1:${port},[::1]:${port}`)
+  .split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
 const maxSessions = Math.max(1, Number.parseInt(process.env.NEXARA_MAX_SESSIONS || "4", 10) || 4);
 
 const executionBackend = process.env.NEXARA_EXECUTION_BACKEND || "pty";
@@ -85,9 +100,19 @@ const registry = new SessionRegistry({
 });
 
 function originAllowed(origin) {
-  // Non-browser clients may omit Origin; browser clients must match the allowlist.
+  // Browser state-changing requests and browser WebSockets must provide an
+  // exact allowlisted Origin. Non-browser clients may omit it on other routes.
   return !origin || allowedOrigins.has(origin);
 }
+function requestHostAllowed(request) {
+  const value = request.headers.host;
+  return typeof value === "string" && allowedHosts.has(value.trim().toLowerCase());
+}
+app.addHook("onRequest", async (request, reply) => {
+  if (!requestHostAllowed(request)) {
+    return reply.code(421).send({ error: "Host not allowed" });
+  }
+});
 
 function shellEnvironment() {
   const source = process.env;
@@ -177,6 +202,9 @@ if (executionBackend === "microvm") {
 }
 
 app.post("/api/sessions", async (request, reply) => {
+  if (!request.headers.origin || !allowedOrigins.has(request.headers.origin)) {
+    return reply.code(403).send({ error: "Origin not allowed" });
+  }
   if (executionBackend === "microvm") return reply.code(503).send({ error: "PTY sessions are disabled when the Firecracker microVM backend is selected." });
   if (!sandboxEnabled && !allowUnsandboxedHostPty) return reply.code(503).send({ error: "No execution backend configured. Configure NEXARA_SANDBOX_IMAGE and a sandbox runtime; unsandboxed host PTY is disabled by default." });
   if (!registry.canCreate(request.ip)) return reply.code(429).send({ error: "Session creation limit or capacity reached" });
@@ -232,6 +260,12 @@ app.get("/api/sessions/:id/stream", { websocket: true }, (socket, request) => {
     return;
   }
   const { session } = entry;
+  // A browser WebSocket must have an Origin; omitting it is allowed only for
+  // non-browser clients that possess the per-session secret.
+  if (!origin) {
+    socket.close(1008, "Origin required");
+    return;
+  }
   session.onExit(() => socket.close(1001, "PTY process exited"));
   const onData = session.onData(data => {
     registry.touch(request.params.id);
