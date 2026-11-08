@@ -58,3 +58,36 @@ test("supervisor refuses new VMs after shutdown", async () => {
   await supervisor.close();
   await assert.rejects(() => supervisor.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest }), /closed/);
 });
+
+
+test("supervisor enforces aggregate instance and resource quotas", async () => {
+  let launches = 0;
+  const supervisor = new VmSupervisor({
+    authority,
+    driver: { isolationType: "microvm", launch: async () => { launches++; return {}; }, stop: async () => {} },
+    clock: () => 1010,
+    limits: { maxInstances: 1, cpuMillis: 1000, memoryMiB: 512, diskMiB: 16 }
+  });
+  await supervisor.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest });
+  await assert.rejects(() => supervisor.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest }), /aggregate resource limits/);
+  assert.equal(launches, 1);
+  await supervisor.close();
+});
+
+test("supervisor reaps expired leases and releases aggregate capacity", async () => {
+  let now = 1010;
+  let stops = 0;
+  const supervisor = new VmSupervisor({
+    authority,
+    driver: { isolationType: "microvm", launch: async () => ({}), stop: async () => { stops++; } },
+    clock: () => now,
+    limits: { maxInstances: 1 }
+  });
+  const vm = await supervisor.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest });
+  now = 1_000 + 15 * 60 * 1000;
+  assert.deepEqual(await supervisor.reapExpired(), [vm.id]);
+  assert.equal(stops, 1);
+  assert.equal(supervisor.get(vm.id), null);
+  await supervisor.create({ envelope: lease(now), subject: "tenant-1", imageDigest: digest });
+  await supervisor.close();
+});
