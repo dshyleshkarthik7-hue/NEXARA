@@ -30,7 +30,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang cmake pkg-config libssl-dev \
+          sudo apt-get install -y build-essential clang cmake pkg-config libssl-dev linux-libc-dev \
             musl-tools musl-dev libseccomp-dev cpio gzip git curl wget perl file python3 \
             bc bison flex xz-utils libelf-dev libncurses-dev e2fsprogs
       - name: Build Firecracker, jailer and static BusyBox
