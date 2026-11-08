@@ -121,9 +121,15 @@ export class LinuxJailerProvider {
       child,
       stop: async () => {
         if (stopped) return;
-        stopped = true;
-        try { await terminate(child, this.#stopTimeoutMs); }
-        finally { await this.#networkProvider.release(network); }
+        try {
+          await terminate(child, this.#stopTimeoutMs);
+          await this.#networkProvider.release(network);
+          stopped = true;
+        } catch (error) {
+          // Keep stop retryable: a transient process or namespace cleanup
+          // failure must not permanently mark this host as released.
+          throw error;
+        }
       }
     });
   }
