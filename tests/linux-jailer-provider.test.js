@@ -32,7 +32,7 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   };
   const provider = new LinuxJailerProvider({
     jailerPath: jailer, firecrackerPath: firecracker,
-    chrootBaseDir: path.join(directory, "jails"),
+    chrootBaseDir: "/j",
     uid: 10001, gid: 10001, netnsPath: netns, spawn
   });
   const host = await provider.start({
@@ -48,7 +48,7 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   assert.ok(invoked.args.includes("--netns"));
   assert.ok(invoked.args.includes("cpu.max=150000 100000"));
   assert.ok(invoked.args.includes("memory.max=805306368"));
-  assert.equal(host.socketPath, path.join(directory, "jails", "firecracker",
+  assert.equal(host.socketPath, path.join("/j", "firecracker",
     "12345678-1234-4234-8234-123456789abc", "root", "firecracker.socket"));
   assert.equal(host.jailRoot, path.dirname(host.socketPath));
   await provider.stop(host);
