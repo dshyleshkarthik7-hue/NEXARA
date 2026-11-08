@@ -16,7 +16,10 @@ for x in ip nft curl pgrep sha256sum; do command -v "$x" >/dev/null || fail "mis
 : "${NEXARA_JAILER_PARENT_CGROUP:?Set NEXARA_JAILER_PARENT_CGROUP to a pre-created delegated cgroup-v2 parent containing 'nexara' in its path}"
 parent="/sys/fs/cgroup/$NEXARA_JAILER_PARENT_CGROUP"
 [[ -d "$parent" ]] || fail "delegated cgroup parent does not exist: $parent"
-for c in cpu memory pids; do grep -qw "$c" "$parent/cgroup.controllers" || fail "parent cgroup lacks $c controller"; done
+for c in cpu memory pids; do
+  grep -qw "$c" "$parent/cgroup.controllers" || fail "parent cgroup lacks available $c controller"
+  grep -qw "$c" "$parent/cgroup.subtree_control" || fail "parent cgroup has not delegated/enabled $c controller"
+done
 uid="${NEXARA_JAILER_UID:-12345}"; gid="${NEXARA_JAILER_GID:-12345}"
 [[ "$uid" =~ ^[1-9][0-9]+$ && "$gid" =~ ^[1-9][0-9]+$ ]] || fail "jailer UID/GID must be non-root numeric IDs"
 base="${NEXARA_JAILER_BASE:-/srv/jailer}"
