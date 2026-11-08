@@ -49,5 +49,5 @@ test("PC I/O fabric routes ATA task-file and 16-bit data accesses", () => {
   fabric.write(0x1f7, 0xec);
   assert.equal(fabric.read(0x1f7), 0x48n);
   assert.equal(fabric.read(0x1f0, 16), 0x0040n);
-  assert.throws(() => fabric.read(0x20, 16), /byte accesses only/);
+  assert.throws(() => fabric.read(0x20, 16), /byte reads only/);
 });
