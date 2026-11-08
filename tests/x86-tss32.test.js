@@ -315,9 +315,10 @@ test("32-bit far JMP task switch reads TSS images through the active page tables
   putDescriptor(6, 0x89, 0x4000); // target available TSS linear base
   cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
   cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x3000, limit: 0x67, present: true, busy: true, usable: true });
-  // Identity-map page tables, then map the two TSS linear pages to separate frames.
+  // Map instruction fetch at 0x700 and map the two TSS linear pages to separate frames.
   const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
   put32(0x1000, 0x2003);
+  put32(0x2000, 0x0003);
   put32(0x2000 + 3 * 4, 0x5003);
   put32(0x2000 + 4 * 4, 0x6003);
   paging.loadCr3(0x1000);
