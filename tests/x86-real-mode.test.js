@@ -152,3 +152,65 @@ test("real-mode CLD and STD update only the direction flag", () => {
   cpu.step();
   assert.equal(cpu.flags & 0x400, 0);
 });
+
+test("real-mode ModRM MOV and XOR support DS and SS effective addresses", () => {
+  const { memory, cpu } = cpuFor([
+    0xbb,0x00,0x05,       // MOV BX,0500h
+    0xbe,0x02,0x00,       // MOV SI,0002h
+    0xb8,0x34,0x12,       // MOV AX,1234h
+    0x89,0x00,            // MOV [BX+SI],AX
+    0x8b,0x08,            // MOV CX,[BX+SI]
+    0x31,0x08,            // XOR [BX+SI],CX
+    0x8b,0x10,            // MOV DX,[BX+SI]
+    0xbd,0x00,0x06,       // MOV BP,0600h
+    0x89,0x46,0x02,       // MOV [BP+2],AX (SS default)
+    0x8b,0x56,0x02,       // MOV DX,[BP+2]
+    0xf4
+  ]);
+  const result = cpu.run({ maxInstructions: 16 });
+  assert.equal(result.state, "halted");
+  assert.equal(cpu.cx, 0x1234);
+  assert.equal(cpu.dx, 0x1234);
+  assert.deepEqual(memory.read(0x502, 2), Uint8Array.of(0, 0));
+  assert.deepEqual(memory.read(0x6602, 2), Uint8Array.of(0x34, 0x12));
+});
+
+test("real-mode REP MOVSB and STD direction copy bytes in the requested direction", () => {
+  const { memory, cpu } = cpuFor([
+    0xbe,0x00,0x06,       // MOV SI,0600h
+    0xbf,0x00,0x07,       // MOV DI,0700h
+    0xb9,0x03,0x00,       // MOV CX,3
+    0xf3,0xa4,            // REP MOVSB
+    0xbf,0x02,0x07,       // MOV DI,0702h
+    0xbe,0x02,0x06,       // MOV SI,0602h
+    0xfd,                 // STD
+    0xa4,                 // MOVSB backwards
+    0xf4
+  ]);
+  memory.write(0x600, Uint8Array.of(0x11,0x22,0x33));
+  const result = cpu.run({ maxInstructions: 16 });
+  assert.equal(result.state, "halted");
+  assert.deepEqual(memory.read(0x700, 3), Uint8Array.of(0x11,0x22,0x33));
+  assert.equal(cpu.si, 0x600);
+  assert.equal(cpu.di, 0x700);
+  assert.equal(cpu.cx, 0);
+  assert.equal(cpu.flags & 0x400, 0x400);
+});
+
+test("real-mode REP STOSW and LODSW transfer words and update indices", () => {
+  const { memory, cpu } = cpuFor([
+    0xb8,0xcd,0xab,       // MOV AX,ABCDh
+    0xbf,0x00,0x08,       // MOV DI,0800h
+    0xb9,0x02,0x00,       // MOV CX,2
+    0xf3,0xab,            // REP STOSW
+    0xbe,0x00,0x08,       // MOV SI,0800h
+    0xad,                 // LODSW
+    0xf4
+  ]);
+  const result = cpu.run({ maxInstructions: 16 });
+  assert.equal(result.state, "halted");
+  assert.deepEqual(memory.read(0x800, 4), Uint8Array.of(0xcd,0xab,0xcd,0xab));
+  assert.equal(cpu.ax, 0xabcd);
+  assert.equal(cpu.si, 0x802);
+  assert.equal(cpu.di, 0x804);
+});
