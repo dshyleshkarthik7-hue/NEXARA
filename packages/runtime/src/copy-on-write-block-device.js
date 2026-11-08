@@ -1,5 +1,5 @@
 import { constants as fsConstants } from "node:fs";
-import { mkdir, lstat, open } from "node:fs/promises";
+import { mkdir, lstat, open, unlink } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { BLOCK_SECTOR_SIZE } from "./block-device.js";
@@ -132,6 +132,34 @@ export class CopyOnWriteBlockDevice {
     }
     for (const [position, value] of changedBytes) {
       await writeAll(this.#handle, Buffer.from([value]), position);
+    }
+  }
+
+  /** Materialize a consistent raw disk image for a hypervisor that accepts raw files. */
+  async materializeRaw(targetPath) {
+    this.#assertOpen();
+    if (typeof targetPath !== "string" || !path.isAbsolute(targetPath) || targetPath === this.filePath) {
+      throw new TypeError("Raw disk target must be a distinct absolute path");
+    }
+    const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0);
+    let output;
+    try {
+      output = await open(targetPath, flags, 0o600);
+      const chunkSectors = 2048;
+      for (let lba = 0; lba < this.sectors; lba += chunkSectors) {
+        const count = Math.min(chunkSectors, this.sectors - lba);
+        const bytes = await this.readSectors(lba, count);
+        await writeAll(output, bytes, lba * BLOCK_SECTOR_SIZE);
+      }
+      await output.truncate(this.sectors * BLOCK_SECTOR_SIZE);
+      await output.sync();
+      return Object.freeze({ path: targetPath, sectors: this.sectors, byteLength: this.sectors * BLOCK_SECTOR_SIZE, format: "raw" });
+    } catch (error) {
+      await output?.close().catch(() => {});
+      await unlink(targetPath).catch(() => {});
+      throw error;
+    } finally {
+      await output?.close().catch(() => {});
     }
   }
 
