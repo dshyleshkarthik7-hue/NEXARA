@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { FirecrackerDriver } from "../packages/security/src/firecracker-driver.js";
+import { DurableRecoveryJournal } from "../packages/security/src/durable-recovery-journal.js";
 
 const digest = bytes => "sha256:" + createHash("sha256").update(bytes).digest("hex");
 
@@ -184,5 +185,27 @@ test("Firecracker preserves staged guest disk when COW write-back fails", async 
   const result = await driver.retryWriteback(handle);
   assert.equal(result.changedSectors, 3);
   assert.equal(handle.writebackPending, false);
+  await assert.rejects(() => readFile(staged), { code: "ENOENT" });
+});
+
+
+test("Firecracker shutdown journals failed write-back outside the jail", async t => {
+  const f = await fixture(t);
+  const journal = new DurableRecoveryJournal({ directory: path.join(f.directory, "host-recovery") });
+  const rootfsDevice = {
+    sectors: 2048,
+    materializeRaw: async target => {
+      await writeFile(target, Buffer.alloc(2048 * 512, 0x5a), { flag: "wx", mode: 0o600 });
+      return { path: target, sectors: 2048, byteLength: 2048 * 512, format: "raw" };
+    },
+    importRaw: async () => { throw new Error("overlay unavailable"); }
+  };
+  const driver = new FirecrackerDriver({ provider: f.provider, resolveImage: f.resolveImage, recoveryJournal: journal });
+  const handle = await driver.launch({ ...config, rootfsDevice });
+  const staged = path.join(f.jailRoot, "nexara", "rootfs.ext4");
+  await driver.stop(handle);
+  assert.equal(handle.recoveryQueued, true);
+  assert.equal(handle.writebackPending, false);
+  assert.equal((await journal.list()).length, 1);
   await assert.rejects(() => readFile(staged), { code: "ENOENT" });
 });
