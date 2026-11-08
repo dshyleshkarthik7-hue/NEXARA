@@ -13,7 +13,6 @@ test("persistent VM registry reopens the same COW overlay after reconstruction",
   const root = await mkdtemp(path.join(os.tmpdir(), "nexara-vm-registry-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bytes = Buffer.alloc(64 * 512, 0x11);
-  const base = new MemoryBlockDevice({ sectors: 64, readOnly: true });
   // Seed the fixture before making its immutable read-only view.
   const writable = new MemoryBlockDevice({ sectors: 64 });
   writable.writeSectors(0, bytes);
@@ -35,8 +34,8 @@ test("persistent VM registry reopens the same COW overlay after reconstruction",
 
   const restarted = new PersistentVmRegistry(options);
   const recovered = await restarted.open(vmId);
-  assert.equal(Buffer.from(await recovered.readSectors(3)).[0], 0x7a);
-  assert.equal(Buffer.from(await recovered.readSectors(4)).[0], 0x11);
+  assert.equal(Buffer.from(await recovered.readSectors(3))[0], 0x7a);
+  assert.equal(Buffer.from(await recovered.readSectors(4))[0], 0x11);
   await assert.rejects(() => restarted.create({ vmId, sectors: 64, baseDigest }), /already registered/);
   await restarted.close();
 });
