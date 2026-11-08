@@ -52,8 +52,8 @@ export class X86Cpu {
     this.controlRegisters = new Map([[0, 0x60000010n], [2, 0n], [3, 0n], [4, 0n]]);
     this.efer = 0n;
     this.systemTables = new X86SystemTableState(memory, { longMode: mode === 64 });
-    this.gdt = new X86DescriptorTable(memory, { base: 0n, limit: Math.min(0xffff, memory.byteLength - 1), kind: "gdt", longMode: mode === 64 });
-    this.idt = new X86DescriptorTable(memory, { base: 0n, limit: Math.min(0xffff, memory.byteLength - 1), kind: "idt", longMode: mode === 64 });
+    this.gdt = new X86DescriptorTable(memory, { base: 0n, limit: Math.min(0xffff, memory.byteLength - 1), kind: "gdt", longMode: mode === 64, paging: legacyPaging32 });
+    this.idt = new X86DescriptorTable(memory, { base: 0n, limit: Math.min(0xffff, memory.byteLength - 1), kind: "idt", longMode: mode === 64, paging: legacyPaging32 });
     this.segments = new X86SegmentState({ gdt: this.gdt, cpl: 0, longMode: mode === 64 });
   }
 
@@ -62,7 +62,7 @@ export class X86Cpu {
     this.idt.setRegister(this.systemTables.idtr.base, this.systemTables.idtr.limit);
     const ldtr = this.systemTables.ldtr;
     this.segments.ldt = ldtr.usable && ldtr.present
-      ? new X86DescriptorTable(this.memory, { base: ldtr.base, limit: ldtr.limit, kind: "ldt", longMode: this.mode === 64 })
+      ? new X86DescriptorTable(this.memory, { base: ldtr.base, limit: ldtr.limit, kind: "ldt", longMode: this.mode === 64, paging: this.legacyPaging32 })
       : null;
   }
 
@@ -171,7 +171,7 @@ export class X86Cpu {
         const ldtDescriptor = this.gdt.readSystemDescriptor(incoming.segments.ldt, { allowedTypes: [2] });
         if (ldtDescriptor.limit > 0xffffn || ldtDescriptor.base + ldtDescriptor.limit >= BigInt(this.memory.byteLength)) throw new Error("Incoming LDT exceeds guest memory or supported bounds");
         nextLdtr = { selector: incoming.segments.ldt, base: ldtDescriptor.base, limit: Number(ldtDescriptor.limit), present: true, usable: true };
-        nextLdt = new X86DescriptorTable(this.memory, { base: ldtDescriptor.base, limit: Number(ldtDescriptor.limit), kind: "ldt", longMode: false });
+        nextLdt = new X86DescriptorTable(this.memory, { base: ldtDescriptor.base, limit: Number(ldtDescriptor.limit), kind: "ldt", longMode: false, paging: taskPaging });
       }
       const nextSegments = new X86SegmentState({ gdt: this.gdt, ldt: nextLdt, cpl: targetCpl, longMode: false });
       nextSegments.installCodeSegment(incoming.segments.cs);
@@ -180,7 +180,11 @@ export class X86Cpu {
       if (BigInt(incoming.eip) > nextSegments.registers.cs.cache.limit) throw new Error("Incoming TSS EIP exceeds code-segment limit");
       const targetAccessAddress = this.gdt.base + BigInt((selector >>> 3) * 8 + 5);
       const currentAccessAddress = this.gdt.base + BigInt((current.selector >>> 3) * 8 + 5);
-      if (targetAccessAddress >= BigInt(this.memory.byteLength) || currentAccessAddress >= BigInt(this.memory.byteLength)) throw new Error("TSS descriptor access byte exceeds guest memory");
+      if (targetAccessAddress > 0xffffffffn || currentAccessAddress > 0xffffffffn) throw new Error("TSS descriptor access byte exceeds 32-bit linear address space");
+      if (pagingEnabled) {
+        this.legacyPaging32.translate(targetAccessAddress, { write: true, user: false });
+        if (reason === "jmp" || reason === "iret-task") this.legacyPaging32.translate(currentAccessAddress, { write: true, user: false });
+      } else if (targetAccessAddress >= BigInt(this.memory.byteLength) || currentAccessAddress >= BigInt(this.memory.byteLength)) throw new Error("TSS descriptor access byte exceeds guest memory");
       const oldTss = new X86Tss32(this.memory, { base: current.base, limit: current.limit, paging: taskPaging });
       oldTss.setTaskState({
         eip: returnIp, eflags: Number(this.flags & 0xffffffffn),
@@ -193,8 +197,8 @@ export class X86Cpu {
       const targetAccess = reason === "iret-task" ? targetDescriptor.raw[5] : targetDescriptor.raw[5] | 2;
       const currentAccess = (reason === "jmp" || reason === "iret-task") ? currentDescriptor.raw[5] & ~2 : currentDescriptor.raw[5];
       if (reason === "task-gate" || reason === "call") targetTss.backlink = current.selector;
-      this.memory.write(Number(targetAccessAddress), Uint8Array.of(targetAccess));
-      if (reason === "jmp" || reason === "iret-task") this.memory.write(Number(currentAccessAddress), Uint8Array.of(currentAccess));
+      this.#writeLinear(Number(targetAccessAddress), Uint8Array.of(targetAccess), { user: false });
+      if (reason === "jmp" || reason === "iret-task") this.#writeLinear(Number(currentAccessAddress), Uint8Array.of(currentAccess), { user: false });
       if (nextLdtr) this.systemTables.loadLdtr(nextLdtr); else this.systemTables.clearLdtr();
       this.systemTables.loadTaskRegister({ selector, base: targetDescriptor.base, limit: Number(targetDescriptor.limit), present: true, busy: true, usable: true });
       this.#syncDescriptorTables();
