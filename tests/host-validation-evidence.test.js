@@ -14,7 +14,8 @@ const scripts = [
   "scripts/build-firecracker-test-disk.sh",
   "scripts/build-firecracker-kernel.sh",
   "scripts/build-host-binaries.sh",
-  "scripts/verify-host-bundle.sh"
+  "scripts/verify-host-bundle.sh",
+  "scripts/run-firecracker-two-boot.sh"
 ];
 
 test("all Linux host validation scripts pass bash syntax checking", () => {
