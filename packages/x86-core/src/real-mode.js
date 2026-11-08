@@ -262,6 +262,17 @@ export class X86RealModeCpu {
       } else {
         this.#setSubFlags(left, right, width);
       }
+    } else if ([0x04,0x05,0x2c,0x2d].includes(opcode)) {
+      const width = (opcode & 1) ? 16 : 8;
+      const immediate = width === 8 ? this.#fetch8() : this.#fetch16();
+      const left = width === 8 ? this.ax & 0xff : this.ax;
+      const result = opcode === 0x04 || opcode === 0x05
+        ? this.#setAddFlags(left, immediate, width)
+        : this.#setSubFlags(left, immediate, width);
+      if (opcode === 0x04 || opcode === 0x05) {
+        if (width === 8) this.#setReg8(0, result); else this.ax = result;
+      } else if (width === 8) this.#setReg8(0, result);
+      else this.ax = result;
     } else if (opcode === 0x80 || opcode === 0x81 || opcode === 0x83) {
       const width = opcode === 0x80 ? 8 : 16;
       const operand = this.#decodeRm(this.#fetch8(), width);
@@ -281,6 +292,16 @@ export class X86RealModeCpu {
         this.#setSubFlags(left, immediate, width);
         if (operation === 5) operand.write(result);
       }
+    } else if (opcode === 0x8c || opcode === 0x8e) {
+      const operand = this.#decodeRm(this.#fetch8(), 16);
+      const segmentIndex = operand.reg;
+      const segmentNames = ["es","cs","ss","ds"];
+      if (segmentIndex > 3 || (opcode === 0x8e && segmentIndex === 1)) {
+        this.segmentOverride = null; this.ip = start;
+        throw new Error("Invalid segment-register move");
+      }
+      if (opcode === 0x8c) operand.write(this[segmentNames[segmentIndex]]);
+      else this[segmentNames[segmentIndex]] = operand.read();
     } else if (opcode === 0x88 || opcode === 0x8a) {
       const operand = this.#decodeRm(this.#fetch8(), 8);
       if (opcode === 0x88) operand.write(this.#reg8(operand.reg));
@@ -316,6 +337,18 @@ export class X86RealModeCpu {
       const displacement = this.#fetch16();
       this.#push(this.ip);
       this.ip = (this.ip + (displacement & 0x8000 ? displacement - 0x10000 : displacement)) & MASK16;
+    } else if (opcode === 0x9a) {
+      const offset = this.#fetch16(), segment = this.#fetch16();
+      this.#push(this.cs); this.#push(this.ip);
+      this.cs = segment; this.ip = offset;
+    } else if (opcode === 0xea) {
+      this.ip = this.#fetch16(); this.cs = this.#fetch16();
+    } else if (opcode === 0xcb) {
+      this.ip = this.#pop(); this.cs = this.#pop();
+    } else if (opcode === 0xca) {
+      const adjustment = this.#fetch16();
+      this.ip = this.#pop(); this.cs = this.#pop();
+      this.sp = (this.sp + adjustment) & MASK16;
     } else if (opcode === 0xc3) {
       this.ip = this.#pop();
     } else if (opcode === 0x9c) {
