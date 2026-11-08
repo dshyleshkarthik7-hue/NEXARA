@@ -10,7 +10,11 @@ const scripts = [
   "scripts/verify-jailed-process.sh",
   "scripts/verify-two-boot-guest-evidence.sh",
   "scripts/collect-host-validation-evidence.sh",
-  "scripts/build-firecracker-guest-initramfs.sh"
+  "scripts/build-firecracker-guest-initramfs.sh",
+  "scripts/build-firecracker-test-disk.sh",
+  "scripts/build-firecracker-kernel.sh",
+  "scripts/build-host-binaries.sh",
+  "scripts/verify-host-bundle.sh"
 ];
 
 test("all Linux host validation scripts pass bash syntax checking", () => {
