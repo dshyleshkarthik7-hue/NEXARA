@@ -160,11 +160,15 @@ test("copy-on-write snapshots restore into a new VM overlay without changing the
   const snapshotPath = path.join(directory, "snapshot.cow");
   const metadata = await source.createSnapshot(snapshotPath);
   assert.equal(metadata.format, "nexara-cow-v1");
-  const restored = await CopyOnWriteBlockDevice.restore({ snapshotPath, directory, vmId: "87654321-4321-4321-8321-cba987654321", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase });
+  const restored = await CopyOnWriteBlockDevice.restore({ snapshotPath, directory, vmId: "87654321-4321-4321-8321-cba987654321", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase, expectedSnapshotDigest: metadata.snapshotDigest });
   assert.equal((await restored.readSectors(2))[0], 0x72);
   assert.equal((await restored.readSectors(1))[0], 0x19);
   await restored.writeSectors(2, new Uint8Array(512).fill(0x44));
   assert.equal((await source.readSectors(2))[0], 0x72);
-  await assert.rejects(() => CopyOnWriteBlockDevice.restore({ snapshotPath, directory, vmId: "87654321-4321-4321-8321-cba987654321", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase }));
+  await assert.rejects(() => CopyOnWriteBlockDevice.restore({ snapshotPath, directory, vmId: "87654321-4321-4321-8321-cba987654321", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase, expectedSnapshotDigest: metadata.snapshotDigest }));
+  const tampered = path.join(directory, "tampered.cow");
+  await copyFile(snapshotPath, tampered);
+  const tamperedBytes = await readFile(tampered); tamperedBytes[tamperedBytes.length - 1] ^= 0xff; await writeFile(tampered, tamperedBytes);
+  await assert.rejects(() => CopyOnWriteBlockDevice.restore({ snapshotPath: tampered, directory, vmId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase, expectedSnapshotDigest: metadata.snapshotDigest }), /integrity digest mismatch/);
   await restored.close(); await source.close(); await immutableBase.close();
 });
