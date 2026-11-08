@@ -353,6 +353,17 @@ test("segment-register MOV and far CALL/RETF transfer control correctly", () => 
   assert.equal(cpu.bx, 0x5678);
 });
 
+test("real-mode ROL and ROR rotate through operand bits and update carry", () => {
+  const { cpu } = cpuFor([
+    0xb0,0x81, 0xd0,0xc0, // ROL AL,1 => 03, CF=1
+    0xd0,0xc8,            // ROR AL,1 => 81, CF=1
+    0xf4
+  ]);
+  assert.equal(cpu.run({ maxInstructions: 8 }).state, "halted");
+  assert.equal(cpu.ax & 0xff, 0x81);
+  assert.equal(cpu.flags & 1, 1);
+});
+
 test("real-mode shifts set carry, overflow and sign flags with arithmetic sign extension", () => {
   const { cpu } = cpuFor([
     0xb0,0x81, 0xd0,0xe0, // SHL AL,1 => 02, CF=1, OF=1
