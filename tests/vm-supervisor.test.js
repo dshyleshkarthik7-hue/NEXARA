@@ -124,3 +124,39 @@ test("supervisor blocks VM admission until durable recovery succeeds", async () 
   assert.equal(replayCalls, 2);
   await supervisor.close();
 });
+
+
+test("supervisor releases persistent disk handles after stop and failed launch", async () => {
+  const released = [];
+  const disk = { sectors: 32, close: async () => {} };
+  const supervisor = new VmSupervisor({
+    authority,
+    driver: {
+      isolationType: "microvm",
+      launch: async () => ({ id: "host-vm" }),
+      stop: async () => {}
+    },
+    clock: () => 1010,
+    rootDiskFactory: async () => disk,
+    releaseRootDisk: async id => { released.push(id); }
+  });
+  const vm = await supervisor.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest });
+  await supervisor.stop(vm.id);
+  assert.deepEqual(released, [vm.id]);
+  await supervisor.close();
+
+  const failed = new VmSupervisor({
+    authority,
+    driver: {
+      isolationType: "microvm",
+      launch: async () => { throw new Error("jailer failed"); },
+      stop: async () => {}
+    },
+    clock: () => 1010,
+    rootDiskFactory: async () => disk,
+    releaseRootDisk: async id => { released.push(id); }
+  });
+  await assert.rejects(() => failed.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest }), /jailer failed/);
+  assert.equal(released.length, 2);
+  await failed.close();
+});
