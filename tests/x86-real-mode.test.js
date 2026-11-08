@@ -263,3 +263,16 @@ test("real-mode segment override prefixes apply to string source but not ES dest
   assert.equal(result.state, "halted");
   assert.equal(memory.read(0x1500, 1)[0], 0x22);
 });
+
+test("real-mode direct accumulator MOV honors segment override prefixes", () => {
+  const { memory, cpu } = cpuFor([
+    0xa1,0x00,0x06,       // MOV AX,[0600h] from DS
+    0x26,0xa1,0x00,0x06,  // MOV AX,ES:[0600h]
+    0xf4
+  ], { ds: 0x100, es: 0x200 });
+  memory.write(0x1600, Uint8Array.of(0x11,0x11));
+  memory.write(0x2600, Uint8Array.of(0x22,0x22));
+  const result = cpu.run({ maxInstructions: 4 });
+  assert.equal(result.state, "halted");
+  assert.equal(cpu.ax, 0x2222);
+});
