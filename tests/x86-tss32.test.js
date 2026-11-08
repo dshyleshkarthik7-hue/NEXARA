@@ -206,3 +206,53 @@ test("rejects a busy target TSS without saving or switching the current task", (
   assert.deepEqual(memory.read(0x500 + 32, 66), before);
   assert.equal(cpu.systemTables.task.selector, 0x28);
 });
+test("far CALL to an available TSS sets backlink and nested-task state", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x700 });
+  const gdtBase = 0x100;
+  const putCodeData = (index, access) => memory.write(gdtBase + index * 8, Uint8Array.from([0xff,0xff,0,0,0,access,0xcf,0]));
+  putCodeData(1, 0x9a); putCodeData(2, 0x92);
+  writeTssDescriptor(memory, gdtBase, 5, 0x500, 0x8b);
+  writeTssDescriptor(memory, gdtBase, 6, 0x600, 0x89);
+  cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
+  cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  const target = new X86Tss32(memory, { base: 0x600, limit: 0x67 });
+  target.setTaskState({ eip: 0x750, eflags: 0x202,
+    registers: { eax: 1, ecx: 2, edx: 3, ebx: 4, esp: 0x1f00, ebp: 6, esi: 7, edi: 8 },
+    segments: { es: 0x10, cs: 0x08, ss: 0x10, ds: 0x10, fs: 0x10, gs: 0x10, ldt: 0 } });
+  memory.write(0x700, Uint8Array.of(0x9a, 0x34, 0x12, 0, 0, 0x30, 0));
+  cpu.step();
+  assert.equal(cpu.ip, 0x750);
+  assert.equal(target.backlink, 0x28);
+  assert.equal((cpu.flags & (1n << 14n)) !== 0n, true);
+  assert.equal(memory.read(gdtBase + 5 * 8 + 5, 1)[0] & 0x0f, 0x0b);
+  assert.equal(memory.read(gdtBase + 6 * 8 + 5, 1)[0] & 0x0f, 0x0b);
+});
+
+test("32-bit IDT task gate switches tasks and records backlink", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x700 });
+  const gdtBase = 0x100, idtBase = 0x300;
+  const putCodeData = (index, access) => memory.write(gdtBase + index * 8, Uint8Array.from([0xff,0xff,0,0,0,access,0xcf,0]));
+  putCodeData(1, 0x9a); putCodeData(2, 0x92);
+  writeTssDescriptor(memory, gdtBase, 5, 0x500, 0x8b);
+  writeTssDescriptor(memory, gdtBase, 6, 0x600, 0x89);
+  cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
+  cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
+  cpu.systemTables.loadIdtr(idtBase, 0x7ff); cpu.idt.setRegister(idtBase, 0x7ff);
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  const target = new X86Tss32(memory, { base: 0x600, limit: 0x67 });
+  target.setTaskState({ eip: 0x750, eflags: 0x202,
+    registers: { eax: 1, ecx: 2, edx: 3, ebx: 4, esp: 0x1f00, ebp: 6, esi: 7, edi: 8 },
+    segments: { es: 0x10, cs: 0x08, ss: 0x10, ds: 0x10, fs: 0x10, gs: 0x10, ldt: 0 } });
+  const gate = idtBase + 32 * 8;
+  memory.write(gate, Uint8Array.of(0, 0, 0x30, 0, 0, 0x85, 0, 0));
+  cpu.deliverException(32, { returnIp: 0x704 });
+  assert.equal(cpu.ip, 0x750);
+  assert.equal(cpu.systemTables.task.selector, 0x30);
+  assert.equal(target.backlink, 0x28);
+  assert.equal((cpu.flags & (1n << 14n)) !== 0n, true);
+  assert.equal(memory.read(gdtBase + 5 * 8 + 5, 1)[0] & 0x0f, 0x0b);
+  assert.equal(memory.read(gdtBase + 6 * 8 + 5, 1)[0] & 0x0f, 0x0b);
+});
