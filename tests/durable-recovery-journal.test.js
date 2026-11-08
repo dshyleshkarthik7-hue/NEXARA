@@ -36,3 +36,20 @@ test("failed recovery replay leaves the durable record intact", async t => {
   await assert.rejects(() => journal.recoverPending(async () => ({ importRaw: async () => { throw new Error("storage unavailable"); } })), /storage unavailable/);
   assert.equal((await journal.list()).length, 1);
 });
+
+
+test("durable recovery journal rejects tampered disk contents before import", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexara-recovery-tamper-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const source = path.join(root, "guest.raw");
+  await writeFile(source, Buffer.alloc(1024, 0x31), { mode: 0o600 });
+  const journal = new DurableRecoveryJournal({ directory: path.join(root, "journal") });
+  const saved = await journal.save({ vmId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", sourcePath: source });
+  const { writeFile: overwrite } = await import("node:fs/promises");
+  await overwrite(saved.diskPath, Buffer.alloc(1024, 0x32));
+  let imports = 0;
+  await assert.rejects(() => journal.recoverPending(async () => ({
+    importRaw: async () => { imports++; }
+  })), /integrity check failed/);
+  assert.equal(imports, 0);
+});
