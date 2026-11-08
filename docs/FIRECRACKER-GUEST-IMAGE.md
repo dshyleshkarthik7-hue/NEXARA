@@ -1,51 +1,46 @@
-# Building a Firecracker test guest
+# NEXARA self-built Firecracker guest bundle
 
-NEXARA supports an optional digest-pinned initramfs in the Firecracker boot-source API. This is a minimal Linux guest harness, not a complete distro image or a security certification.
+NEXARA's build pipeline compiles the upstream Firecracker VMM and jailer, a static BusyBox userspace, and a Linux kernel suitable for direct Firecracker boot. The runtime bundle is intended to contain the executables and guest images needed by the host; the host still requires a Linux kernel with KVM support and access to /dev/kvm.
 
-## Inputs
-- A trusted compatible Linux kernel with virtio block and serial console support.
-- A static BusyBox executable built for the guest architecture.
-- `cpio`, `gzip`, and `sha256sum` on the image-building host.
-- A Firecracker-compatible ext4 root disk image within the signed VM disk quota.
+## Build the complete bundle
 
-Build the initramfs:
-```sh
-scripts/build-firecracker-guest-initramfs.sh /absolute/path/to/busybox-static dist/guest-initramfs.cpio.gz
-sha256sum dist/guest-initramfs.cpio.gz
-```
-
-The trusted image resolver should return a manifest containing `kernelPath`, `kernelDigest`, `rootfsPath`, `rootfsDigest`, `initrdPath`, and `initrdDigest`, in addition to its signed manifest digest. Never accept artifact paths or hashes directly from an API client. The Firecracker driver verifies all three artifact digests, stages the initramfs read-only inside the jail, and sets `initrd_path` on the boot-source API.
-
-## Guest probes
-- `NEXARA_GUEST_BOOT_OK`: Linux reached init.
-- `NEXARA_DISK_WRITE_OK`: marker was created and synced on the first boot; `NEXARA_DISK_PERSISTENCE_PRESENT`: the same marker was found on a subsequent boot using the same persistent disk. The guest powers off after the probes so the host can perform a clean write-back.
-- `NEXARA_EGRESS_BLOCKED`: optional BusyBox `nc` probe could not connect to a public test address.
-- `NEXARA_GUEST_VALIDATION_COMPLETE`: guest-side probes finished.
-
-The egress probe is advisory; a failed TCP connection alone does not prove firewall enforcement. Correlate with host nftables counters and packet captures. Keep the test network default-deny.
-
-## Limitations
-The builder requires a static BusyBox and a compatible kernel supplied by the operator. It does not download or compile a kernel, sign images, or produce a full Linux distribution. The minimal shell is PID 1 and does not include SSH, systemd, package management, or a general-purpose service stack. CI tests mocked Firecracker API/process boundaries. Real guest boot, guest escape probes, and disk persistence after actual host power loss still require a dedicated KVM runner.
-
-## Building NEXARA's own host binaries
-
-NEXARA builds the **upstream Firecracker and jailer executables** from a pinned upstream release; it does not implement a new VMM or a substitute jailer. The two executables are built from the same Firecracker source tree and version. Static BusyBox is built separately with musl for the minimal guest initramfs.
-
-On Ubuntu 24.04, run:
+On Ubuntu 24.04, install the compiler toolchain and kernel build utilities:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y build-essential clang cmake pkg-config libssl-dev musl-tools musl-dev cpio gzip git curl wget perl file python3
+sudo apt-get install -y build-essential clang cmake pkg-config libssl-dev \
+  musl-tools musl-dev cpio gzip git curl wget perl file python3 \
+  bc bison flex xz-utils libelf-dev libncurses-dev
+```
+
+Then run:
+
+```sh
 bash scripts/build-host-binaries.sh
+bash scripts/build-firecracker-kernel.sh
 bash scripts/build-firecracker-guest-initramfs.sh \
   "$PWD/dist/host-binaries/busybox" \
   "$PWD/dist/host-binaries/nexara-guest-initramfs.cpio.gz"
+(cd dist/host-binaries && sha256sum -c SHA256SUMS)
 ```
 
-Or run the **Build NEXARA host binaries** GitHub Actions workflow. It uploads Firecracker, jailer, static BusyBox, the initramfs, build metadata and SHA-256 checksums as a 30-day artifact. Review the pinned source tags, build logs and hashes before promoting binaries to a production host. A successful compilation does not mean a Firecracker guest has booted.
+The GitHub Actions workflow builds the same bundle and uploads it as `nexara-microvm-bundle-linux-x86_64`. Source versions are pinned in the workflow:
+- Firecracker and jailer: upstream Firecracker v1.13.1, built together from one source checkout.
+- BusyBox: upstream BusyBox 1.36.1, statically linked with musl.
+- Linux kernel: upstream Linux 6.12.1, configured with virtio block, serial console, ext4, initramfs and built-in basic networking.
 
-## Alpine Linux compatibility
+The scripts record exact source commit IDs (Firecracker/BusyBox), source archive SHA-256 (kernel), binary checksums and build metadata. The Linux source URL is kernel.org. Review the source pins and build logs before production use.
 
-Firecracker is a microVM VMM, not a PC emulator: it does not boot a conventional Alpine ISO through BIOS/UEFI. It boots a Linux kernel directly. For an Alpine-based guest, use a trusted Firecracker-compatible kernel (with virtio block and serial console support) and an Alpine **minirootfs tarball** installed into an ext4 root disk, or use the minimal BusyBox initramfs built above. The current validation initramfs is intentionally a tiny test guest, not a full Alpine userspace.
+## Guest image format
 
-Do not feed an Alpine ISO to `boot-source`. To test a full Alpine userspace, create an ext4 image from a digest-pinned Alpine minirootfs, populate it using a trusted image-building pipeline, configure a compatible init process and serial console, and attach it as the root block device. Pin and record the Alpine release, minirootfs digest and kernel digest in the trusted image manifest.
+Firecracker does not boot a conventional ISO through BIOS/UEFI. It boots a kernel directly. NEXARA therefore builds a kernel image (`vmlinux.bin`) and a BusyBox initramfs (`nexara-guest-initramfs.cpio.gz`) rather than an ISO. This produces a tiny, self-contained guest userspace without needing an Alpine installation or package manager.
+
+The initramfs validates boot, writable ext4 root-disk access, persistence markers and a best-effort egress probe. It is a test guest, not a full Alpine distribution. A fuller Alpine userspace can later be installed into an ext4 root disk, but that would introduce an Alpine rootfs artifact and its package provenance; it is not required for the minimal NEXARA boot test.
+
+## Dependency boundary
+
+The *built runtime bundle* contains Firecracker, jailer, BusyBox, the guest kernel and initramfs. It does not require Alpine, Docker, a preinstalled Firecracker binary or a prebuilt BusyBox binary. The host still needs a Linux/KVM-capable kernel, /dev/kvm, cgroup v2, seccomp, and networking/firewall support. The build itself necessarily downloads pinned upstream source and uses a compiler/toolchain; a literal zero-dependency source build is not technically possible.
+
+## Validation boundary
+
+A successful build proves compilation and artifact creation only. It does not prove that a guest booted. Actual boot, jailer cgroup/seccomp behavior, two-boot disk persistence and network isolation require running the bundle on a dedicated Linux KVM host. The existing privileged host-validation workflow must be run on the configured self-hosted KVM runner to produce hardware evidence.
