@@ -5,17 +5,78 @@ import { MemoryBlockDevice, BLOCK_SECTOR_SIZE } from "../../runtime/src/block-de
  * This is not a BIOS ROM, POST implementation, or PC firmware image.
  */
 export class LegacyBios {
-  constructor({ disk, drive = 0x80, heads = 16, sectorsPerTrack = 63, output = () => {} } = {}) {
+  constructor({ disk, drive = 0x80, heads = 16, sectorsPerTrack = 63, output = () => {}, keyboard = [], ticks = 0 } = {}) {
     if (!(disk instanceof MemoryBlockDevice)) throw new TypeError("Legacy BIOS requires a MemoryBlockDevice");
     if (!Number.isInteger(drive) || drive < 0x80 || drive > 0xff) throw new RangeError("BIOS hard-disk drive number must be 0x80..0xff");
     if (!Number.isInteger(heads) || heads < 1 || heads > 256) throw new RangeError("BIOS geometry heads must be 1..256");
     if (!Number.isInteger(sectorsPerTrack) || sectorsPerTrack < 1 || sectorsPerTrack > 63) throw new RangeError("BIOS sectors per track must be 1..63");
     if (typeof output !== "function") throw new TypeError("BIOS output must be a function");
+    if (!Array.isArray(keyboard) || keyboard.some(key => !Number.isInteger(key) || key < 0 || key > 0xffff)) throw new TypeError("keyboard must be an array of 16-bit BIOS key words");
+    if (!Number.isSafeInteger(ticks) || ticks < 0) throw new RangeError("BIOS ticks must be a non-negative safe integer");
     this.disk = disk;
     this.drive = drive;
     this.heads = heads;
     this.sectorsPerTrack = sectorsPerTrack;
     this.output = output;
+    this.keyboard = [...keyboard];
+    this.ticks = ticks % 0x1800b0;
+    this.midnightFlag = 0;
+  }
+
+  enqueueKey(keyWord) {
+    if (!Number.isInteger(keyWord) || keyWord < 0 || keyWord > 0xffff) throw new RangeError("key word must be 16-bit unsigned");
+    this.keyboard.push(keyWord);
+  }
+
+  advanceTicks(count = 1) {
+    if (!Number.isSafeInteger(count) || count < 0) throw new RangeError("tick count must be a non-negative safe integer");
+    const day = 0x1800b0;
+    const total = this.ticks + count;
+    if (total >= day) this.midnightFlag = 1;
+    this.ticks = total % day;
+    return this.ticks;
+  }
+
+  #keyboardInterrupt(cpu) {
+    const functionCode = (cpu.ax >>> 8) & 0xff;
+    if (functionCode === 0x00 || functionCode === 0x10) {
+      if (this.keyboard.length === 0) {
+        // This emulator is non-blocking: ZF reports no queued key instead of stalling the host.
+        cpu.flags |= 0x40;
+        return true;
+      }
+      cpu.ax = this.keyboard.shift();
+      cpu.flags &= ~0x40;
+      return true;
+    }
+    if (functionCode === 0x01 || functionCode === 0x11) {
+      if (this.keyboard.length === 0) cpu.flags |= 0x40;
+      else {
+        cpu.ax = this.keyboard[0];
+        cpu.flags &= ~0x40;
+      }
+      return true;
+    }
+    if (functionCode === 0x02) {
+      cpu.ax = (cpu.ax & 0xff00) | 0;
+      return true;
+    }
+    cpu.flags |= 0x40;
+    return true;
+  }
+
+  #clockInterrupt(cpu) {
+    const functionCode = (cpu.ax >>> 8) & 0xff;
+    if (functionCode !== 0x00) {
+      this.#status(cpu, 0x86);
+      return true;
+    }
+    cpu.cx = (this.ticks >>> 16) & 0xffff;
+    cpu.dx = this.ticks & 0xffff;
+    cpu.ax = (cpu.ax & 0xff00) | this.midnightFlag;
+    this.midnightFlag = 0;
+    cpu.flags &= ~1;
+    return true;
   }
 
   #status(cpu, status, count = 0) {
@@ -162,6 +223,8 @@ export class LegacyBios {
       throw new TypeError("Legacy BIOS interrupt requires a real-mode CPU");
     }
     if (vector === 0x13) return this.#diskInterrupt(cpu);
+    if (vector === 0x16) return this.#keyboardInterrupt(cpu);
+    if (vector === 0x1a) return this.#clockInterrupt(cpu);
     if (vector === 0x10) {
       const functionCode = (cpu.ax >>> 8) & 0xff;
       if (functionCode === 0x0e) {
