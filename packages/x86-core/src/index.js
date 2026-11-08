@@ -11,10 +11,14 @@ const CF = 1n, PF = 1n << 2n, ZF = 1n << 6n, SF = 1n << 7n, OF = 1n << 11n;
 const ARITH_FLAGS = CF | PF | ZF | SF | OF;
 
 export class CpuFault extends Error {
-  constructor(message, ip) {
-    super(`${message} at guest IP 0x${ip.toString(16)}`);
+  constructor(message, ip, { vector = null, errorCode = null, cause = undefined } = {}) {
+    super(`${message} at guest IP 0x${ip.toString(16)}`, cause === undefined ? undefined : { cause });
     this.name = "CpuFault";
     this.ip = ip;
+    // Architectural exception metadata is kept separate from the diagnostic
+    // message so callers can deliver the correct vector/error-code frame.
+    this.vector = vector;
+    this.errorCode = errorCode;
   }
 }
 
@@ -257,7 +261,14 @@ export class X86Cpu {
       const detail = rollbackFailure
         ? error.message + "; task-switch rollback failed: " + rollbackFailure.message
         : error.message;
-      throw new CpuFault("Task switch failed: " + detail, this.ip);
+      // Page faults retain their architectural identity across rollback. Other
+      // validation failures are reported as #GP for this supported subset;
+      // finer #TS/#NP/#SS classification requires typed descriptor faults.
+      if (error instanceof PageFault) {
+        const errorCode = (error.present ? 1 : 0) | (error.write ? 2 : 0) | (error.user ? 4 : 0);
+        throw new CpuFault("Task switch page fault: " + detail, this.ip, { vector: 14, errorCode, cause: error });
+      }
+      throw new CpuFault("Task switch failed: " + detail, this.ip, { vector: 13, errorCode: 0, cause: error });
     }
   }
   readControlRegister(index) {
