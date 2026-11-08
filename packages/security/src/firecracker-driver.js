@@ -54,11 +54,15 @@ export class FirecrackerDriver {
       || typeof manifest.kernelPath !== "string" || !path.isAbsolute(manifest.kernelPath)
       || typeof manifest.rootfsPath !== "string" || !path.isAbsolute(manifest.rootfsPath)
       || typeof manifest.kernelDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(manifest.kernelDigest)
-      || typeof manifest.rootfsDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(manifest.rootfsDigest)) {
+      || typeof manifest.rootfsDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(manifest.rootfsDigest)
+      || ((manifest.initrdPath !== undefined || manifest.initrdDigest !== undefined)
+        && (typeof manifest.initrdPath !== "string" || !path.isAbsolute(manifest.initrdPath)
+          || typeof manifest.initrdDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(manifest.initrdDigest)))) {
       throw new Error("Trusted image manifest is missing or does not match the leased image digest");
     }
     await verifyFileDigest(manifest.kernelPath, manifest.kernelDigest);
     const rootfsBytes = await verifyFileDigest(manifest.rootfsPath, manifest.rootfsDigest);
+    if (manifest.initrdPath) await verifyFileDigest(manifest.initrdPath, manifest.initrdDigest);
     if (rootfsBytes > config.quotas.diskMiB * 1024 * 1024) {
       throw new Error("Guest root filesystem exceeds the leased disk quota");
     }
@@ -93,7 +97,9 @@ export class FirecrackerDriver {
       await mkdir(artifactDir, { mode: 0o755 });
       const kernelTarget = path.join(artifactDir, "vmlinux");
       const rootfsTarget = path.join(artifactDir, "rootfs.ext4");
+      const initrdTarget = manifest.initrdPath ? path.join(artifactDir, "initramfs.cpio.gz") : null;
       await copyFile(manifest.kernelPath, kernelTarget);
+      if (initrdTarget) await copyFile(manifest.initrdPath, initrdTarget);
       if (config.rootfsDevice !== undefined) {
         const disk = config.rootfsDevice;
         const materialized = await disk.materializeRaw(rootfsTarget);
@@ -106,6 +112,7 @@ export class FirecrackerDriver {
         await copyFile(manifest.rootfsPath, rootfsTarget);
       }
       await chmod(kernelTarget, 0o444);
+      if (initrdTarget) { await chmod(initrdTarget, 0o444); await chown(initrdTarget, host.uid, host.gid); }
       await chmod(rootfsTarget, config.rootfsDevice !== undefined ? 0o660 : (manifest.readOnlyRootfs === true ? 0o444 : 0o660));
       await chown(rootfsTarget, host.uid, host.gid);
       await apiRequest(host.socketPath, "PUT", "/machine-config", {
@@ -115,7 +122,8 @@ export class FirecrackerDriver {
       }, this.#timeoutMs);
       await apiRequest(host.socketPath, "PUT", "/boot-source", {
         kernel_image_path: "/nexara/vmlinux",
-        boot_args: typeof manifest.bootArgs === "string" ? manifest.bootArgs : "console=ttyS0 reboot=k panic=1"
+        boot_args: typeof manifest.bootArgs === "string" ? manifest.bootArgs : (initrdTarget ? "console=ttyS0 rdinit=/init reboot=k panic=1" : "console=ttyS0 reboot=k panic=1"),
+        ...(initrdTarget ? { initrd_path: "/nexara/initramfs.cpio.gz" } : {})
       }, this.#timeoutMs);
       await apiRequest(host.socketPath, "PUT", "/drives/rootfs", {
         drive_id: "rootfs",
