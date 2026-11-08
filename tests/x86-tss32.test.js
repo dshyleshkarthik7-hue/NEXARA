@@ -231,6 +231,9 @@ test("far CALL to an available TSS sets backlink and nested-task state", () => {
   assert.equal((cpu.flags & (1n << 14n)) !== 0n, true);
   assert.equal(memory.read(gdtBase + 5 * 8 + 5, 1)[0] & 0x0f, 0x0b);
   assert.equal(memory.read(gdtBase + 6 * 8 + 5, 1)[0] & 0x0f, 0x0b);
+  const savedPrevious = new X86Tss32(memory, { base: 0x500, limit: 0x67 }).getTaskState();
+  assert.equal(savedPrevious.segments.cs, 0x08);
+  assert.equal(savedPrevious.segments.ss, 0x10);
   memory.write(0x750, Uint8Array.of(0xcf)); // nested-task IRET
   cpu.step();
   assert.equal(cpu.ip, 0x704);
