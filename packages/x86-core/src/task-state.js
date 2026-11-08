@@ -57,6 +57,7 @@ export class X86Tss32 {
   #writeBytes(offset, source) {
     const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
     const linear = BigInt(this.#offset(offset, bytes.length));
+    this.preflightWrite(offset, bytes.length);
     if (!this.paging) { this.memory.write(Number(linear), bytes); return; }
     const writes = [];
     let copied = 0;
@@ -69,6 +70,20 @@ export class X86Tss32 {
       copied += count;
     }
     for (const write of writes) this.memory.write(write.physical, write.bytes);
+  }
+
+  preflightWrite(offset, length) {
+    const linear = BigInt(this.#offset(offset, length));
+    if (!this.paging) return true;
+    let copied = 0;
+    while (copied < length) {
+      const current = linear + BigInt(copied);
+      const physical = this.paging.translate(current, { write: true, user: false });
+      const count = Math.min(length - copied, 4096 - Number(current & 0xfffn));
+      if (physical + count > this.memory.byteLength) throw new RangeError("Translated TSS write exceeds guest physical memory");
+      copied += count;
+    }
+    return true;
   }
 
   #read16(offset) {
