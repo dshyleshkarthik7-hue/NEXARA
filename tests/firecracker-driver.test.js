@@ -161,3 +161,22 @@ test("Firecracker driver rejects broker root disks exceeding lease quota", async
   await assert.rejects(() => driver.launch({ ...config, quotas: { ...config.quotas, diskMiB: 1 }, rootfsDevice: { sectors: 4097, materializeRaw: async () => ({}) } }), /Invalid broker-managed root disk/);
   assert.equal(starts, 0);
 });
+
+
+test("Firecracker preserves staged guest disk when COW write-back fails", async t => {
+  const f = await fixture(t);
+  const rootfsDevice = {
+    sectors: 2048,
+    materializeRaw: async target => {
+      await writeFile(target, Buffer.alloc(2048 * 512, 0x5a), { flag: "wx", mode: 0o600 });
+      return { path: target, sectors: 2048, byteLength: 2048 * 512, format: "raw" };
+    },
+    importRaw: async () => { throw new Error("overlay unavailable"); }
+  };
+  const driver = new FirecrackerDriver({ provider: f.provider, resolveImage: f.resolveImage });
+  const handle = await driver.launch({ ...config, rootfsDevice });
+  const staged = path.join(f.jailRoot, "nexara", "rootfs.ext4");
+  await assert.rejects(() => driver.stop(handle), /overlay unavailable/);
+  assert.equal(handle.writebackPending, true);
+  assert.equal((await readFile(staged)).length, 2048 * 512, "guest changes must remain recoverable");
+});
