@@ -34,7 +34,7 @@ test("copy-on-write disk reads base sectors until changed and persists overlay w
   await overlay.close();
   overlay = await CopyOnWriteBlockDevice.open({
     directory, vmId: "12345678-1234-4234-8234-123456789abc",
-    sectors: 16, baseDigest: digest, baseDevice: immutableBase, create: false
+    sectors: 16, baseDigest: digestOf(baseBytes), baseDevice: immutableBase, create: false
   });
   assert.equal((await overlay.readSectors(2, 2))[512], 0x7a);
   assert.equal(await overlay.changedSectorCount(), 2);
@@ -48,7 +48,7 @@ test("copy-on-write disk rejects base mismatch, writable base and out-of-range w
   const base = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 4 });
   await assert.rejects(() => CopyOnWriteBlockDevice.open({
     directory, vmId: "12345678-1234-4234-8234-123456789abc",
-    sectors: 4, baseDigest: digest, baseDevice: base
+    sectors: 4, baseDigest: digestOf(new Uint8Array(4 * 512)), baseDevice: base
   }), /base device must be read-only/);
   await base.close();
   const readOnly = await FileBlockDevice.open({
