@@ -81,6 +81,10 @@ run_boot(){
   done
   [[ -n "$fc_pid" ]] || fail "cannot identify Firecracker child of jailer PID $jailer_pid"
   ACTIVE_FIRECRACKER_PID="$fc_pid"
+  # Verify kernel-enforced restrictions while the guest process is alive.
+  # The guest intentionally powers itself off after emitting its completion
+  # marker, so checking only after that marker races with process teardown.
+  NEXARA_CGROUP_PREFIX=nexara bash "$(dirname "$0")/verify-jailed-process.sh" "$fc_pid"
   api(){ curl --fail --silent --show-error --unix-socket "$sock" -X PUT "http://localhost$1" -H 'Content-Type: application/json' -d "$2" >/dev/null; }
   api /boot-source '{"kernel_image_path":"/vmlinux.bin","initrd_path":"/initramfs.cpio.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off"}'
   api /drives/rootfs '{"drive_id":"rootfs","path_on_host":"/rootfs.ext4","is_root_device":true,"is_read_only":false}'
@@ -94,9 +98,6 @@ run_boot(){
     sleep 0.1
   done
   (( complete == 1 )) || { cat "$log" >&2; fail "guest boot $number did not complete"; }
-  fc_pid="$(pgrep -P "$jailer_pid" -x firecracker | head -n1 || true)"
-  [[ -n "$fc_pid" ]] || fail "Firecracker child exited before live jail verification"
-  NEXARA_CGROUP_PREFIX=nexara bash "$(dirname "$0")/verify-jailed-process.sh" "$fc_pid"
   cp "$log" "$work/boot-$number.serial.log.saved"
   kill -TERM "$fc_pid" 2>/dev/null || true
   for _ in $(seq 1 50); do
