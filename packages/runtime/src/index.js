@@ -98,4 +98,3 @@ export { MemoryBlockDevice, BLOCK_SECTOR_SIZE } from "./block-device.js";
 export { AtaPioDevice } from "./ata-pio.js";
 export { LegacyBootSectorLoader, LEGACY_BOOT_ADDRESS, LEGACY_BOOT_SIGNATURE } from "./legacy-boot.js";
 
-export { FileBlockDevice } from "./file-block-device.js";
