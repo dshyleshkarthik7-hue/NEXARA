@@ -106,6 +106,16 @@ export class PersistentVmRegistry {
   /** Resolver passed to DurableRecoveryJournal; identity is resolved only via host registry. */
   resolveDevice = async vmId => this.open(vmId);
 
+  async release(vmId) {
+    await this.#ready;
+    validateVmId(vmId);
+    const device = this.#opened.get(vmId);
+    if (!device) return false;
+    this.#opened.delete(vmId);
+    await device.close();
+    return true;
+  }
+
   async close() {
     const devices = [...this.#opened.values()];
     this.#opened.clear();
