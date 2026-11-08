@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat } from "node:fs/promises";
 import http from "node:http";
+import net from "node:net";
 import path from "node:path";
 
 /**
@@ -151,15 +152,18 @@ function apiRequest(socketPath, method, endpoint, body, timeoutMs) {
 
 async function waitForApi(socketPath, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  let lastError;
   while (Date.now() < deadline) {
     try {
-      await apiRequest(socketPath, "GET", "/", {}, Math.min(500, timeoutMs));
+      await new Promise((resolve, reject) => {
+        const socket = net.createConnection(socketPath);
+        socket.once("connect", () => { socket.destroy(); resolve(); });
+        socket.once("error", reject);
+        socket.setTimeout(Math.min(500, timeoutMs), () => socket.destroy(new Error("Socket connect timed out")));
+      });
       return;
-    } catch (error) {
-      lastError = error;
+    } catch {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
   }
-  throw new Error("Firecracker API socket did not become ready: " + (lastError?.message ?? "timeout"));
+  throw new Error("Firecracker API socket did not become ready before timeout");
 }
