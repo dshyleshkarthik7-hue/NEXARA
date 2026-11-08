@@ -47,7 +47,10 @@ export class FirecrackerDriver {
       throw new Error("Trusted image manifest is missing or does not match the leased image digest");
     }
     await verifyFileDigest(manifest.kernelPath, manifest.kernelDigest);
-    await verifyFileDigest(manifest.rootfsPath, manifest.rootfsDigest);
+    const rootfsBytes = await verifyFileDigest(manifest.rootfsPath, manifest.rootfsDigest);
+    if (rootfsBytes > config.quotas.diskMiB * 1024 * 1024) {
+      throw new Error("Guest root filesystem exceeds the leased disk quota");
+    }
 
     const host = await this.#provider.start(Object.freeze({
       id: config.id,
@@ -140,6 +143,7 @@ async function verifyFileDigest(filePath, expected) {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(filePath)) hash.update(chunk);
   if ("sha256:" + hash.digest("hex") !== expected) throw new Error("Guest image artifact digest mismatch");
+  return stat.size;
 }
 
 function apiRequest(socketPath, method, endpoint, body, timeoutMs) {
