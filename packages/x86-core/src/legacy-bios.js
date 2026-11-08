@@ -24,9 +24,81 @@ export class LegacyBios {
     else cpu.flags |= 1;
   }
 
+  #copyToGuest(cpu, segment, offset, bytes) {
+    const base = ((segment & 0xffff) << 4) + (offset & 0xffff);
+    const addresses = new Uint32Array(bytes.byteLength);
+    for (let i = 0; i < bytes.byteLength; i++) {
+      const address = cpu.a20Enabled ? base + i : ((base + i) & 0xfffff);
+      if (address >= cpu.memory.byteLength) return false;
+      addresses[i] = address;
+    }
+    for (let i = 0; i < bytes.byteLength; i++) {
+      cpu.memory.write(addresses[i], bytes.subarray(i, i + 1));
+    }
+    return true;
+  }
+
+  #readGuest(cpu, segment, offset, length) {
+    const base = ((segment & 0xffff) << 4) + (offset & 0xffff);
+    const bytes = new Uint8Array(length);
+    for (let i = 0; i < length; i++) {
+      const address = cpu.a20Enabled ? base + i : ((base + i) & 0xfffff);
+      if (address >= cpu.memory.byteLength) return null;
+      bytes[i] = cpu.memory.read(address, 1)[0];
+    }
+    return bytes;
+  }
+
+  #extendedRead(cpu, requestedDrive) {
+    if (requestedDrive !== this.drive) {
+      this.#status(cpu, 1);
+      return true;
+    }
+    const dap = this.#readGuest(cpu, cpu.ds, cpu.si, 16);
+    if (!dap || dap[0] < 0x10 || dap[1] !== 0) {
+      this.#status(cpu, 1);
+      return true;
+    }
+    const count = dap[2] | (dap[3] << 8);
+    const offset = dap[4] | (dap[5] << 8);
+    const segment = dap[6] | (dap[7] << 8);
+    let lba = 0n;
+    for (let i = 0; i < 8; i++) lba |= BigInt(dap[8 + i]) << BigInt(i * 8);
+    if (count < 1 || count > 127 || offset + count * BLOCK_SECTOR_SIZE > 0x10000
+      || lba > BigInt(Number.MAX_SAFE_INTEGER)) {
+      this.#status(cpu, 1);
+      return true;
+    }
+    let bytes;
+    try {
+      bytes = this.disk.readSectors(Number(lba), count);
+    } catch {
+      this.#status(cpu, 4);
+      return true;
+    }
+    if (!this.#copyToGuest(cpu, segment, offset, bytes)) {
+      this.#status(cpu, 9);
+      return true;
+    }
+    this.#status(cpu, 0, count);
+    return true;
+  }
+
   #diskInterrupt(cpu) {
     const functionCode = (cpu.ax >>> 8) & 0xff;
     const requestedDrive = cpu.dx & 0xff;
+    if (functionCode === 0x41) {
+      if (requestedDrive !== this.drive || (cpu.bx & 0xffff) !== 0x55aa) {
+        this.#status(cpu, 1);
+      } else {
+        cpu.ax = 0x3000;
+        cpu.bx = 0xaa55;
+        cpu.cx = 1;
+        cpu.flags &= ~1;
+      }
+      return true;
+    }
+    if (functionCode === 0x42) return this.#extendedRead(cpu, requestedDrive);
     if (functionCode === 0x00) {
       this.#status(cpu, requestedDrive === this.drive ? 0 : 1);
       return true;
@@ -76,18 +148,9 @@ export class LegacyBios {
       return true;
     }
 
-    const base = ((cpu.es & 0xffff) << 4) + offset;
-    const addresses = new Uint32Array(bytes.byteLength);
-    for (let i = 0; i < bytes.byteLength; i++) {
-      const address = cpu.a20Enabled ? base + i : ((base + i) & 0xfffff);
-      if (address >= cpu.memory.byteLength) {
-        this.#status(cpu, 9);
-        return true;
-      }
-      addresses[i] = address;
-    }
-    for (let i = 0; i < bytes.byteLength; i++) {
-      cpu.memory.write(addresses[i], bytes.subarray(i, i + 1));
+    if (!this.#copyToGuest(cpu, cpu.es, offset, bytes)) {
+      this.#status(cpu, 9);
+      return true;
     }
     this.#status(cpu, 0, count);
     return true;
