@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 fail(){ echo "BUILD FAILED: $*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null || fail "missing command: $1"; }
-for x in git cargo rustc make gcc g++ perl wget tar gzip sha256sum nproc; do need "$x"; done
+for x in git cargo rustc make gcc g++ perl wget tar gzip sha256sum nproc docker; do need "$x"; done
 ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 OUT="${NEXARA_BINARY_OUT:-$ROOT/dist/host-binaries}"
 WORK="${NEXARA_BUILD_WORK:-$ROOT/.build/host-binaries}"
@@ -19,10 +19,11 @@ git -C "$FC_SRC" submodule update --init --recursive
 # Build the upstream project binaries; do not patch or replace the jailer.
 (
   cd "$FC_SRC"
-  cargo build --release --locked --bin firecracker
-  cargo build --release --locked -p jailer --bin jailer
+  # Upstream devtool selects the supported musl toolchain and builds the
+  # matching Firecracker+jailer pair from the pinned source revision.
+  tools/devtool build --release
 )
-FC_TARGET="$FC_SRC/build/cargo_target/release"
+FC_TARGET="$FC_SRC/build/cargo_target/$(rustc -vV | awk -F': ' '/^host:/ {print $2}')/release"
 [[ -x "$FC_TARGET/firecracker" ]] || fail "Firecracker binary missing from expected Cargo target directory: $FC_TARGET"
 [[ -x "$FC_TARGET/jailer" ]] || fail "jailer binary missing from expected Cargo target directory: $FC_TARGET"
 install -m 0755 "$FC_TARGET/firecracker" "$OUT/firecracker"
