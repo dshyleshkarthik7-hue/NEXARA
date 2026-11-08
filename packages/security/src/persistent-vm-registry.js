@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { mkdir, lstat, open, readFile, unlink, link } from "node:fs/promises";
 import path from "node:path";
 import { CopyOnWriteBlockDevice } from "../../runtime/src/copy-on-write-block-device.js";
@@ -35,6 +35,70 @@ export class PersistentVmRegistry {
       if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
         throw new Error("VM registry and overlay roots must be private non-symlink directories");
       }
+    }
+  }
+
+  /** Stable host-generated UUID bound to a trusted workload key, tenant and image. */
+  async getOrCreateIdentity({ workloadKey, subject, imageDigest } = {}) {
+    await this.#ready;
+    if (typeof workloadKey !== "string" || workloadKey.length < 1 || workloadKey.length > 256
+      || typeof subject !== "string" || !subject || subject.length > 256
+      || typeof imageDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(imageDigest)) {
+      throw new TypeError("Stable VM identity requires trusted workload key, subject and image digest");
+    }
+    const keyHash = createHash("sha256").update(workloadKey).digest("hex");
+    const target = path.join(this.#directory, "identity-" + keyHash + ".json");
+    let record;
+    try {
+      const stat = await lstat(target);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) {
+        throw new Error("Unsafe stable VM identity record");
+      }
+      record = JSON.parse(await readFile(target, "utf8"));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (record) {
+      if (record.version !== 1 || record.keyHash !== keyHash || record.subject !== subject
+        || record.imageDigest !== imageDigest || !/^[-a-f0-9]{36}$/i.test(record.vmId)) {
+        throw new Error("Workload identity is already bound to another tenant or image");
+      }
+      return record.vmId;
+    }
+    const next = { version: 1, keyHash, subject, imageDigest, vmId: randomUUID() };
+    const temp = path.join(this.#directory, randomUUID() + ".identity.tmp");
+    const file = await open(temp, "wx", 0o600);
+    try { await file.writeFile(JSON.stringify(next) + "\n"); await file.sync(); }
+    finally { await file.close(); }
+    try {
+      await link(temp, target);
+      await unlink(temp);
+      const dir = await open(this.#directory, "r");
+      try { await dir.sync(); } finally { await dir.close(); }
+      return next.vmId;
+    } catch (error) {
+      await unlink(temp).catch(() => {});
+      if (error.code === "EEXIST") return this.getOrCreateIdentity({ workloadKey, subject, imageDigest });
+      throw error;
+    }
+  }
+
+  /** Reopen a registered overlay or create it exactly once for this stable UUID. */
+  async openOrCreate({ vmId, sectors, baseDigest } = {}) {
+    await this.#ready;
+    validateIdentity(vmId, sectors, baseDigest);
+    try {
+      const device = await this.open(vmId);
+      const metadataPath = this.#metadataPath(vmId);
+      const record = JSON.parse(await readFile(metadataPath, "utf8"));
+      if (record.sectors !== sectors || record.baseDigest !== baseDigest) {
+        await this.release(vmId);
+        throw new Error("Persistent VM identity is bound to different disk geometry or base image");
+      }
+      return device;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      return this.create({ vmId, sectors, baseDigest });
     }
   }
 
