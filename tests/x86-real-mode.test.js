@@ -376,6 +376,30 @@ test("real-mode shifts set carry, overflow and sign flags with arithmetic sign e
   assert.equal(cpu.flags & 1, 0);
 });
 
+
+test("real-mode RCL and RCR rotate through carry and preserve zero-count flags", () => {
+  const { cpu } = cpuFor([
+    0xb0,0x80, 0xf9,       // MOV AL,80h; STC
+    0xd0,0xd0,             // RCL AL,1 => 01, CF=1
+    0xd0,0xd8,             // RCR AL,1 => 80, CF=1
+    0xf8,                  // CLC
+    0xb9,0x08,0x00,        // MOV CX,8
+    0xd2,0xc0,             // ROL AL,CL (8-bit rotation count 8 => no-op)
+    0xf4
+  ]);
+  const initialFlags = cpu.flags;
+  cpu.run({ maxInstructions: 10 });
+  assert.equal(cpu.ax & 0xff, 0x80);
+  assert.equal(cpu.flags & 1, 0);
+  assert.equal(cpu.flags & 0x40, initialFlags & 0x40);
+});
+
+test("real-mode ROL count is reduced modulo operand width", () => {
+  const { cpu } = cpuFor([0xb0,0x81,0xb9,0x08,0x00,0xd2,0xc0,0xf4]);
+  assert.equal(cpu.run({ maxInstructions: 8 }).state, "halted");
+  assert.equal(cpu.ax & 0xff, 0x81);
+});
+
 test("unsupported immediate arithmetic group operations fault explicitly", () => {
   const { cpu } = cpuFor([0x80,0xc8,0x01]); // OR AL,1 (/1)
   assert.throws(() => cpu.step(), /Unsupported immediate arithmetic group operation \/1/);
