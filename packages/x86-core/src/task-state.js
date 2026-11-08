@@ -109,8 +109,18 @@ export class X86Tss32 {
         throw new RangeError("TSS task selector " + name + " must be 16-bit");
       }
     }
-    for (const [name, offset] of Object.entries(registerOffsets)) this.#write32(offset, values32[name]);
-    for (const [name, offset] of Object.entries(segmentOffsets)) this.#write16(offset, values16[name]);
+    // The architectural task image from EIP through LDTR is contiguous
+    // (offsets 32..97). Commit it with one guest-memory write so a failed
+    // memory operation cannot leave a partially updated saved task context.
+    const image = new Uint8Array(66);
+    const view = new DataView(image.buffer);
+    for (const [name, offset] of Object.entries(registerOffsets)) {
+      view.setUint32(offset - 32, Number(BigInt(values32[name])), true);
+    }
+    for (const [name, offset] of Object.entries(segmentOffsets)) {
+      view.setUint16(offset - 32, values16[name], true);
+    }
+    this.memory.write(this.#offset(32, image.length), image);
     return this.getTaskState();
   }
   get ioMapBase() { return this.#read16(102); }
