@@ -214,3 +214,52 @@ test("real-mode REP STOSW and LODSW transfer words and update indices", () => {
   assert.equal(cpu.si, 0x802);
   assert.equal(cpu.di, 0x804);
 });
+
+test("real-mode ModRM ADD, SUB and CMP update operands and arithmetic flags", () => {
+  const { cpu } = cpuFor([
+    0xb8,0x01,0x00, // MOV AX,1
+    0xbb,0x02,0x00, // MOV BX,2
+    0x03,0xc3,      // ADD AX,BX
+    0x29,0xc3,      // SUB BX,AX
+    0x3b,0xc3,      // CMP AX,BX
+    0xf4
+  ]);
+  const result = cpu.run({ maxInstructions: 8 });
+  assert.equal(result.state, "halted");
+  assert.equal(cpu.ax, 3);
+  assert.equal(cpu.bx, 0xffff);
+  assert.equal(cpu.flags & 1, 1);
+  assert.equal(cpu.flags & 0x80, 0);
+});
+
+test("real-mode segment overrides replace BP default SS and BX default DS", () => {
+  const { memory, cpu } = cpuFor([
+    0xbd,0x20,0x00, // MOV BP,20h
+    0xbb,0x30,0x00, // MOV BX,30h
+    0x3e,0x8b,0x46,0x00, // DS: MOV AX,[BP]
+    0x26,0x8b,0x0f,      // ES: MOV CX,[BX]
+    0xf4
+  ], { ds: 0x100, es: 0x300, ss: 0x200 });
+  memory.write(0x1020, Uint8Array.of(0x11,0x11));
+  memory.write(0x2020, Uint8Array.of(0x22,0x22));
+  memory.write(0x3030, Uint8Array.of(0x33,0x33));
+  memory.write(0x0030, Uint8Array.of(0x44,0x44));
+  const result = cpu.run({ maxInstructions: 8 });
+  assert.equal(result.state, "halted");
+  assert.equal(cpu.ax, 0x1111);
+  assert.equal(cpu.cx, 0x3333);
+});
+
+test("real-mode segment override prefixes apply to string source but not ES destination", () => {
+  const { memory, cpu } = cpuFor([
+    0xbe,0x00,0x04, // MOV SI,0400h
+    0xbf,0x00,0x05, // MOV DI,0500h
+    0x2e,0xa4,       // CS: MOVSB
+    0xf4
+  ], { cs: 0, es: 0x100 });
+  memory.write(0x400, Uint8Array.of(0x11));
+  memory.write(0x7c00 + 0x400, Uint8Array.of(0x22));
+  const result = cpu.run({ maxInstructions: 4 });
+  assert.equal(result.state, "halted");
+  assert.equal(memory.read(0x1500, 1)[0], 0x22);
+});
