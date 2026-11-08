@@ -144,7 +144,7 @@ export class X86Cpu {
   switchTask(selector, { reason = "jmp", returnIp = this.ip } = {}) {
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Hardware task switching requires 32-bit protected mode", this.ip);
     if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n) throw new CpuFault("Task switching with paging enabled is not supported", this.ip);
-    if (reason !== "jmp") throw new CpuFault("Only JMP task switches are implemented; CALL/task-gate switches are unsupported", this.ip);
+    if (reason !== "jmp" && reason !== "task-gate") throw new CpuFault("Unsupported task-switch reason", this.ip);
     if (!Number.isInteger(selector) || selector <= 0 || selector > 0xffff || (selector & 4) !== 0) throw new CpuFault("Task switch requires a non-null GDT selector", this.ip);
     if (!Number.isSafeInteger(returnIp) || returnIp < 0 || returnIp > 0xffffffff) throw new CpuFault("Task return IP is outside 32-bit range", this.ip);
     const current = this.systemTables.task;
@@ -153,7 +153,7 @@ export class X86Cpu {
       const currentDescriptor = this.gdt.readSystemDescriptor(current.selector, { allowedTypes: [11] });
       if (currentDescriptor.base !== current.base || currentDescriptor.limit < 0x67n) throw new Error("Current TR does not match its busy GDT TSS descriptor");
       const targetDescriptor = this.gdt.readSystemDescriptor(selector, { allowedTypes: [9] });
-      if (Math.max(this.segments.cpl, selector & 3) > targetDescriptor.dpl) throw new Error("Task-switch selector privilege check failed");
+      if (reason === "jmp" && Math.max(this.segments.cpl, selector & 3) > targetDescriptor.dpl) throw new Error("Task-switch selector privilege check failed");
       if (targetDescriptor.limit < 0x67n || targetDescriptor.base > 0xffffffffn) throw new Error("Target TSS must be a bounded 32-bit TSS with a 104-byte header");
       const targetTss = new X86Tss32(this.memory, { base: targetDescriptor.base, limit: Number(targetDescriptor.limit) });
       const incoming = targetTss.getTaskState();
@@ -185,15 +185,18 @@ export class X86Cpu {
       });
       // Descriptor writes and the CPU commit occur only after the incoming image validates.
       const targetAccess = targetDescriptor.raw[5] | 2;
-      const currentAccess = currentDescriptor.raw[5] & ~2;
+      const currentAccess = reason === "jmp" ? currentDescriptor.raw[5] & ~2 : currentDescriptor.raw[5];
+      if (reason === "task-gate") targetTss.backlink = current.selector;
       this.memory.write(Number(targetAccessAddress), Uint8Array.of(targetAccess));
-      this.memory.write(Number(currentAccessAddress), Uint8Array.of(currentAccess));
+      if (reason === "jmp") this.memory.write(Number(currentAccessAddress), Uint8Array.of(currentAccess));
       if (nextLdtr) this.systemTables.loadLdtr(nextLdtr); else this.systemTables.clearLdtr();
       this.systemTables.loadTaskRegister({ selector, base: targetDescriptor.base, limit: Number(targetDescriptor.limit), present: true, busy: true, usable: true });
       this.#syncDescriptorTables();
       for (let i = 0; i < 8; i++) this.setRegister(i, BigInt(incoming.registers[["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"][i]]), 32);
       this.controlRegisters.set(3, BigInt(targetTss.cr3));
-      this.flags = BigInt(incoming.eflags) & ~(1n << 14n); // JMP clears NT.
+      this.flags = reason === "task-gate"
+        ? BigInt(incoming.eflags) | (1n << 14n)
+        : BigInt(incoming.eflags) & ~(1n << 14n); // Nested-task flag is set only for task-gate switches.
       this.ip = incoming.eip;
       this.segments = nextSegments;
       return Object.freeze({ selector, ip: this.ip, cpl: this.segments.cpl, task: this.systemTables.snapshot().task });
@@ -668,7 +671,12 @@ export class X86Cpu {
     try {
       const oldCpl = this.segments.cpl;
       const gate = this.idt.readGate(vector, { cpl: oldCpl, software });
-      if (gate.taskGate) throw new Error("Task gates are not supported");
+      if (gate.taskGate) {
+        if (gate.offset !== 0n) throw new Error("Task gate reserved offset must be zero");
+        if (errorCode !== null) throw new Error("Task-gate exception delivery with an error code is not implemented");
+        this.switchTask(gate.selector, { reason: "task-gate", returnIp });
+        return;
+      }
       const target = this.gdt.readSegment(gate.selector, { cpl: 0 });
       if (!target || !target.executable || !target.present || target.conforming) {
         throw new Error("Interrupt target must be a present non-conforming code segment");
