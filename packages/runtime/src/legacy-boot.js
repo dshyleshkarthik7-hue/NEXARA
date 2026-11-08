@@ -45,10 +45,7 @@ export class LegacyBootSectorLoader {
       bytesLoaded: BLOCK_SECTOR_SIZE,
       cs: 0x0000,
       ip: LEGACY_BOOT_ADDRESS,
-      ds: 0x0000,
-      es: 0x0000,
-      ss: 0x0000,
-      sp: LEGACY_BOOT_ADDRESS
+      driveRegister: drive
     });
   }
 }
