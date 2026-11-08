@@ -210,9 +210,10 @@ export class X86RealModeCpu {
     } else if (opcode === 0x31 || opcode === 0x33 || opcode === 0x89 || opcode === 0x8b) {
       const operand = this.#decodeRm(this.#fetch8(), 16);
       const registerValue = this.#reg16(operand.reg);
-      if (opcode === 0x31 || opcode === 0x89) operand.write(opcode === 0x31 ? operand.read() ^ registerValue : registerValue);
-      else this.#setReg16(operand.reg, opcode === 0x33 ? operand.read() ^ registerValue : operand.read());
-      if (opcode === 0x31 || opcode === 0x33) this.#setLogicFlags(opcode === 0x31 ? operand.read() : this.#reg16(operand.reg));
+      const result = opcode === 0x31 || opcode === 0x33 ? operand.read() ^ registerValue : registerValue;
+      if (opcode === 0x31 || opcode === 0x89) operand.write(result);
+      else this.#setReg16(operand.reg, opcode === 0x33 ? result : operand.read());
+      if (opcode === 0x31 || opcode === 0x33) this.#setLogicFlags(result);
     } else if (opcode === 0x88 || opcode === 0x8a) {
       const operand = this.#decodeRm(this.#fetch8(), 8);
       if (opcode === 0x88) operand.write(this.#reg8(operand.reg));
