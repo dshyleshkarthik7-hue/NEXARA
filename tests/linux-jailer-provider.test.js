@@ -19,7 +19,7 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   let released = 0;
   const networkProvider = {
     provision: async () => ({ netnsPath: "/run/netns/nexara-test", tapName: "taptest", release: async () => { released++; } }),
-    release: async handle => handle.release()
+    release: async handle => { released++; if (released === 1) throw new Error("namespace busy"); await handle.release(); }
   };
   const spawn = (command, args, options) => {
     invoked = { command, args, options };
@@ -56,10 +56,13 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   assert.equal(host.socketPath, path.join("/j", "firecracker",
     "12345678-1234-4234-8234-123456789abc", "root", "firecracker.socket"));
   assert.equal(host.jailRoot, path.dirname(host.socketPath));
-  await provider.stop(host);
+  await assert.rejects(() => provider.stop(host), /namespace busy/);
   assert.equal(host.child.signalCode, "SIGTERM");
   assert.equal(released, 1);
   await provider.stop(host);
+  assert.equal(released, 2);
+  await provider.stop(host);
+  assert.equal(released, 2);
 });
 
 test("Linux jailer provider rejects unsafe configuration and writable binaries", async t => {
