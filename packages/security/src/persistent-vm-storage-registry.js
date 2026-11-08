@@ -59,6 +59,45 @@ export class PersistentVmStorageRegistry {
     return record;
   }
 
+  /** Create and register a new VM overlay from a trusted immutable base image. */
+  async createDevice({ vmId, sectors, baseDigest } = {}) {
+    await this.#ready;
+    validateVmId(vmId);
+    if (!Number.isSafeInteger(sectors) || sectors < 1
+      || typeof baseDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(baseDigest)) {
+      throw new TypeError("Invalid persistent VM disk geometry or base digest");
+    }
+    if (await this.getRecord(vmId)) throw new Error("Persistent storage is already registered for this VM");
+    const baseDevice = await this.#resolveBaseDevice(baseDigest, sectors);
+    if (!baseDevice || baseDevice.readOnly !== true || baseDevice.sectors !== sectors) {
+      throw new Error("Trusted base-image resolver returned incompatible or writable storage");
+    }
+    const device = await CopyOnWriteBlockDevice.open({
+      directory: this.#overlayDirectory, vmId, sectors, baseDigest, baseDevice, create: true
+    });
+    try {
+      await this.registerDevice(vmId, device);
+      return device;
+    } catch (error) {
+      await device.close().catch(() => {});
+      throw error;
+    }
+  }
+
+  /** Recovery resolver with bounded handle lifetime for journal replay. */
+  async resolveForRecovery(vmId) {
+    const device = await this.resolveDevice(vmId);
+    let used = false;
+    return Object.freeze({
+      importRaw: async rawPath => {
+        if (used) throw new Error("Recovery device handle has already been consumed");
+        used = true;
+        try { return await device.importRaw(rawPath); }
+        finally { await device.close(); }
+      }
+    });
+  }
+
   async getRecord(vmId) {
     await this.#ready;
     validateVmId(vmId);
