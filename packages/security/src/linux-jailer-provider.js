@@ -5,10 +5,9 @@ import path from "node:path";
 /**
  * Linux Firecracker jailer process provider.
  *
- * Requires a trusted, root-managed Firecracker+jailer installation, a
- * pre-created network namespace with default-deny firewall policy, and a
- * cgroup-v2 hierarchy writable by the jailer. The provider launches the
- * upstream jailer; it does not configure host firewall rules or create TAPs.
+ * Requires trusted, root-managed Firecracker+jailer binaries and a writable
+ * cgroup-v2 parent. The injected network provider creates a private namespace,
+ * TAP device and default-deny nftables policy for every VM.
  */
 export class LinuxJailerProvider {
   #jailerPath;
@@ -61,18 +60,15 @@ export class LinuxJailerProvider {
       verifyTrustedExecutable(this.#jailerPath),
       verifyTrustedExecutable(this.#firecrackerPath)
     ]);
-    const namespace = await lstat(this.#netnsPath);
-    if (!namespace.isFile() && !namespace.isSymbolicLink()) {
-      throw new Error("Network namespace handle must be a bind-mounted namespace handle");
-    }
-    if (namespace.isSymbolicLink()) throw new Error("Network namespace handle must not be a symlink");
-
     const network = await this.#networkProvider.provision({ id: config.id, uid: this.#uid, gid: this.#gid });
     const jailRoot = path.join(
       this.#chrootBaseDir, path.basename(this.#firecrackerPath), config.id, "root"
     );
     const socketPath = path.join(jailRoot, "firecracker.socket");
-    if (socketPath.length >= 104) throw new Error("Firecracker Unix socket path exceeds Linux sun_path limit");
+    if (socketPath.length >= 104) {
+      await this.#networkProvider.release(network).catch(() => {});
+      throw new Error("Firecracker Unix socket path exceeds Linux sun_path limit");
+    }
 
     const cpuQuota = Math.max(1000, config.quotas.cpuMillis * 100);
     const args = [
