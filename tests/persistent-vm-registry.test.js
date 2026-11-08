@@ -29,7 +29,7 @@ test("persistent VM registry reopens the same COW overlay after reconstruction",
   const vmId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
   const registry = new PersistentVmRegistry(options);
   const device = await registry.create({ vmId, sectors: 64, baseDigest });
-  device.writeSectors(3, Buffer.alloc(512, 0x7a));
+  await device.writeSectors(3, Buffer.alloc(512, 0x7a));
   await registry.close();
 
   const restarted = new PersistentVmRegistry(options);
