@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { GuestMemory } from "../packages/runtime/src/index.js";
+import { X86LegacyPaging32 } from "../packages/runtime/src/mmu.js";
 import { X86Tss32 } from "../packages/x86-core/src/task-state.js";
 import { X86Cpu } from "../packages/x86-core/src/index.js";
 
@@ -136,7 +137,14 @@ test("CPU restores a TSS image only after validating all segment selectors", () 
 });
 
 test("CPU task-state save and restore refuse paging until TSS linear accesses are implemented", () => {
-  const { cpu } = setupTaskCpu();
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const paging = new X86LegacyPaging32(memory);
+  const cpu = new X86Cpu({ memory, mode: 32, legacyPaging32: paging, instructionPointer: 0x600 });
+  cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  const put32 = (address, value) => memory.write(address, Uint8Array.of(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255));
+  put32(0x1000, 0x1803); // page directory entry
+  put32(0x1800, 0x0003); // page table entry
   cpu.writeControlRegister(3, 0x1000n);
   cpu.writeControlRegister(0, cpu.readControlRegister(0) | 0x80000000n);
   assert.throws(() => cpu.saveTaskStateToTss(), /paging enabled/);
