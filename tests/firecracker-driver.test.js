@@ -133,13 +133,15 @@ test("Firecracker driver rejects a root disk larger than the signed disk quota",
 test("Firecracker driver attaches a broker-managed copy-on-write disk as raw rootfs", async t => {
   const f = await fixture(t);
   const calls = [];
+  let imported = null;
   const rootfsDevice = {
     sectors: 2048,
     materializeRaw: async target => {
       calls.push(target);
       await writeFile(target, Buffer.alloc(2048 * 512, 0x5a), { flag: "wx", mode: 0o600 });
       return { path: target, sectors: 2048, byteLength: 2048 * 512, format: "raw" };
-    }
+    },
+    importRaw: async source => { imported = source; return { changedSectors: 1 }; }
   };
   const driver = new FirecrackerDriver({ provider: f.provider, resolveImage: f.resolveImage });
   const handle = await driver.launch({ ...config, rootfsDevice });
@@ -148,6 +150,7 @@ test("Firecracker driver attaches a broker-managed copy-on-write disk as raw roo
   assert.equal((await readFile(staged)).length, 2048 * 512);
   assert.equal(f.requests.find(x => x.url === "/drives/rootfs").body.path_on_host, "/nexara/rootfs.ext4");
   await driver.stop(handle);
+  assert.equal(imported, staged, "stopped guest disk must be imported into persistent COW storage");
   await assert.rejects(() => readFile(staged), { code: "ENOENT" });
 });
 
