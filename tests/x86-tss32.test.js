@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { GuestMemory } from "../packages/runtime/src/index.js";
 import { X86Tss32 } from "../packages/x86-core/src/task-state.js";
+import { X86Cpu } from "../packages/x86-core/src/index.js";
 
 test("reads and writes the ring 0-2 privilege stacks in a bounded TSS", () => {
   const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
@@ -68,4 +69,76 @@ test("validates the entire task register image before modifying TSS memory", () 
   assert.throws(() => tss.setTaskState(state), /16-bit/);
   assert.deepEqual(memory.read(0x200, 104), before);
   assert.throws(() => tss.setTaskState({ ...state, eip: -1 }), /32-bit/);
+});
+
+function setupTaskCpu() {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x600 });
+  const gdtBase = 0x100;
+  const putDescriptor = (index, access) => memory.write(gdtBase + index * 8,
+    Uint8Array.from([0xff, 0xff, 0, 0, 0, access, 0xcf, 0]));
+  putDescriptor(1, 0x9a); // ring-0 code
+  putDescriptor(2, 0x92); // ring-0 data
+  putDescriptor(3, 0xfa); // ring-3 code
+  putDescriptor(4, 0xf2); // ring-3 data
+  cpu.systemTables.loadGdtr(gdtBase, 0x27);
+  cpu.gdt.setRegister(gdtBase, 0x27);
+  cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  return { cpu, memory, tss: new X86Tss32(memory, { base: 0x500, limit: 0x67 }) };
+}
+
+test("CPU saves its live 32-bit register and segment context into the active TSS", () => {
+  const { cpu, tss } = setupTaskCpu();
+  cpu.segments.setCpl(3);
+  cpu.segments.installCodeSegment(0x1b);
+  cpu.segments.loadStack(0x23);
+  cpu.segments.loadData("ds", 0x23);
+  cpu.setRegister(0, 0x11, 32);
+  cpu.setRegister(1, 0x22, 32);
+  cpu.setRegister(4, 0x1f00, 32);
+  cpu.ip = 0x650;
+  cpu.flags = 0x202n;
+  cpu.saveTaskStateToTss();
+  const state = tss.getTaskState();
+  assert.equal(state.eip, 0x650);
+  assert.equal(state.eflags, 0x202);
+  assert.equal(state.registers.eax, 0x11);
+  assert.equal(state.registers.ecx, 0x22);
+  assert.equal(state.registers.esp, 0x1f00);
+  assert.deepEqual(state.segments, { es: 0, cs: 0x1b, ss: 0x23, ds: 0x23, fs: 0, gs: 0, ldt: 0 });
+});
+
+test("CPU restores a TSS image only after validating all segment selectors", () => {
+  const { cpu, tss } = setupTaskCpu();
+  tss.setTaskState({
+    eip: 0x650, eflags: 0x202,
+    registers: { eax: 0x11, ecx: 0x22, edx: 3, ebx: 4, esp: 0x1f00, ebp: 6, esi: 7, edi: 8 },
+    segments: { es: 0x23, cs: 0x1b, ss: 0x23, ds: 0x23, fs: 0, gs: 0, ldt: 0 }
+  });
+  const result = cpu.loadTaskStateFromTss();
+  assert.equal(result.ip, 0x650);
+  assert.equal(cpu.segments.cpl, 3);
+  assert.equal(cpu.segments.registers.cs.selector, 0x1b);
+  assert.equal(cpu.segments.registers.ss.selector, 0x23);
+  assert.equal(cpu.getRegister(0, 32), 0x11n);
+  assert.equal(cpu.getRegister(4, 32), 0x1f00n);
+  const before = { ip: cpu.ip, eax: cpu.getRegister(0, 32), cpl: cpu.segments.cpl };
+  tss.setTaskState({
+    eip: 0x650, eflags: 0x202,
+    registers: { eax: 0x99, ecx: 0, edx: 0, ebx: 0, esp: 0x1f00, ebp: 0, esi: 0, edi: 0 },
+    segments: { es: 0x23, cs: 0x23, ss: 0x23, ds: 0x23, fs: 0, gs: 0, ldt: 0 }
+  });
+  assert.throws(() => cpu.loadTaskStateFromTss(), /CS requires a code segment/);
+  assert.equal(cpu.ip, before.ip);
+  assert.equal(cpu.getRegister(0, 32), before.eax);
+  assert.equal(cpu.segments.cpl, before.cpl);
+});
+
+test("CPU task-state save and restore refuse paging until TSS linear accesses are implemented", () => {
+  const { cpu } = setupTaskCpu();
+  cpu.writeControlRegister(3, 0x1000n);
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 0x80000000n);
+  assert.throws(() => cpu.saveTaskStateToTss(), /paging enabled/);
+  assert.throws(() => cpu.loadTaskStateFromTss(), /paging enabled/);
 });
