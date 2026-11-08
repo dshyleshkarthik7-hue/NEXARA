@@ -111,6 +111,8 @@ export class LinuxJailerProvider {
     return Object.freeze({
       socketPath,
       jailRoot,
+      uid: this.#uid,
+      gid: this.#gid,
       child,
       stop: async () => {
         if (stopped) return;
