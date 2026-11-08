@@ -45,7 +45,7 @@ test("real-mode stack and near control transfers preserve 16-bit return offsets"
     0x50,           // PUSH AX
     0xb8,0,0,       // MOV AX,0
     0x5b,           // POP BX
-    0xe8,0x01,0x00, // CALL +1
+    0xe8,0x02,0x00, // CALL +2 to RET
     0xeb,0x01,       // JMP over RET
     0xc3,            // RET
     0xf4             // HLT
