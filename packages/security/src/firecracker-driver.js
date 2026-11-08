@@ -77,7 +77,7 @@ export class FirecrackerDriver {
       throw new Error("Host provider did not return a private Firecracker API socket and stop handle");
     }
 
-    const handle = { host, started: false, id: config.id };
+    const handle = { host, started: false, id: config.id, rootfsDevice: config.rootfsDevice ?? null };
     try {
       await waitForApi(host.socketPath, this.#timeoutMs);
       if (typeof host.jailRoot !== "string" || !path.isAbsolute(host.jailRoot)
@@ -150,6 +150,11 @@ export class FirecrackerDriver {
       }
     } finally {
       await this.#provider.stop(handle.host);
+      if (handle.materializedRootfs && handle.rootfsDevice) {
+        // Firecracker must be stopped before importing its final raw disk state.
+        await chmod(handle.materializedRootfs, 0o600);
+        await handle.rootfsDevice.importRaw(handle.materializedRootfs);
+      }
       if (handle.materializedRootfs) await unlink(handle.materializedRootfs).catch(() => {});
       handle.started = false;
     }
