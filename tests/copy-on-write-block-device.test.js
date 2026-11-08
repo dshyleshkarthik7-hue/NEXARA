@@ -146,3 +146,25 @@ test("copy-on-write disk materializes a hypervisor-compatible raw image without 
   await overlay.close();
   await immutableBase.close();
 });
+
+
+test("copy-on-write snapshots restore into a new VM overlay without changing the source", async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "nexara-cow-snapshot-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const baseBytes = new Uint8Array(8 * 512).fill(0x19);
+  const base = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 8 });
+  await base.writeSectors(0, baseBytes); await base.close();
+  const immutableBase = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 8, readOnly: true, create: false });
+  const source = await CopyOnWriteBlockDevice.open({ directory, vmId: "12345678-1234-4234-8234-123456789abc", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase });
+  await source.writeSectors(2, new Uint8Array(512).fill(0x72));
+  const snapshotPath = path.join(directory, "snapshot.cow");
+  const metadata = await source.createSnapshot(snapshotPath);
+  assert.equal(metadata.format, "nexara-cow-v1");
+  const restored = await CopyOnWriteBlockDevice.restore({ snapshotPath, directory, vmId: "87654321-4321-4321-8321-cba987654321", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase });
+  assert.equal((await restored.readSectors(2))[0], 0x72);
+  assert.equal((await restored.readSectors(1))[0], 0x19);
+  await restored.writeSectors(2, new Uint8Array(512).fill(0x44));
+  assert.equal((await source.readSectors(2))[0], 0x72);
+  await assert.rejects(() => CopyOnWriteBlockDevice.restore({ snapshotPath, directory, vmId: "87654321-4321-4321-8321-cba987654321", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase }));
+  await restored.close(); await source.close(); await immutableBase.close();
+});
