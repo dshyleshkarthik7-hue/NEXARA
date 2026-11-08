@@ -19,8 +19,9 @@ export class VmSupervisor {
   #resolveRecoveryDevice;
   #recoveryComplete;
   #recoveryPromise = null;
+  #rootDiskFactory;
 
-  constructor({ authority, driver, clock = Date.now, limits = {}, recoveryJournal = null, resolveRecoveryDevice = null } = {}) {
+  constructor({ authority, driver, clock = Date.now, limits = {}, recoveryJournal = null, resolveRecoveryDevice = null, rootDiskFactory = null } = {}) {
     if (!authority || typeof authority.verify !== "function"
       || typeof driver?.launch !== "function" || typeof driver?.stop !== "function"
       || driver.isolationType !== "microvm" || typeof clock !== "function") {
@@ -40,10 +41,12 @@ export class VmSupervisor {
     this.#driver = driver;
     if (recoveryJournal !== null && typeof recoveryJournal.recoverPending !== "function") throw new TypeError("Invalid durable recovery journal");
     if (resolveRecoveryDevice !== null && typeof resolveRecoveryDevice !== "function") throw new TypeError("Invalid recovery disk resolver");
+    if (rootDiskFactory !== null && typeof rootDiskFactory !== "function") throw new TypeError("Invalid root disk factory");
     if (recoveryJournal && !resolveRecoveryDevice) throw new TypeError("Recovery disk resolver is required with a recovery journal");
     this.#clock = clock;
     this.#recoveryJournal = recoveryJournal;
     this.#resolveRecoveryDevice = resolveRecoveryDevice;
+    this.#rootDiskFactory = rootDiskFactory;
     // A configured journal is a startup barrier: no workload may launch until
     // every pending disk has been replayed successfully.
     this.#recoveryComplete = !recoveryJournal;
@@ -60,8 +63,12 @@ export class VmSupervisor {
     const record = { id, quotas: lease.quotas, state: "starting", leaseId: lease.id, subject: lease.subject, imageDigest: lease.imageDigest, envelope, handle: null };
     this.#instances.set(id, record);
     try {
+      const rootfsDevice = this.#rootDiskFactory
+        ? await this.#rootDiskFactory({ id, lease, quotas: lease.quotas, imageDigest: lease.imageDigest })
+        : undefined;
       const handle = await this.#driver.launch(Object.freeze({
         id,
+        ...(rootfsDevice ? { rootfsDevice } : {}),
         lease,
         quotas: lease.quotas,
         imageDigest: lease.imageDigest,
