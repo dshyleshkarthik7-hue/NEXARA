@@ -84,6 +84,7 @@ export class LinuxJailerProvider {
       "--cgroup", "memory.swap.max=0",
       "--cgroup", "pids.max=128",
       "--netns", network.netnsPath,
+      "--new-pid-ns",
       "--",
       "--api-sock", "/firecracker.socket"
     ];
