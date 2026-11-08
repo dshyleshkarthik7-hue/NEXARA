@@ -70,19 +70,19 @@ test("Firecracker driver verifies artifacts and configures machine before starti
   assert.equal(f.stopped, 1);
 });
 
-test("Firecracker driver rejects digest mismatch before starting host process", async () => {
+test("Firecracker driver rejects digest mismatch before starting host process", async t => {
+  const f = await fixture(t);
   let starts = 0;
   const driver = new FirecrackerDriver({
     provider: { start: async () => { starts++; }, stop: async () => {} },
     resolveImage: async imageDigest => ({
-      digest: imageDigest, kernelPath: "/kernel", rootfsPath: "/rootfs",
+      digest: imageDigest, kernelPath: f.kernel, rootfsPath: f.rootfs,
       kernelDigest: "sha256:" + "0".repeat(64), rootfsDigest: "sha256:" + "1".repeat(64)
     })
   });
   await assert.rejects(() => driver.launch(config), /digest mismatch/);
   assert.equal(starts, 0);
 });
-
 test("Firecracker driver tears down jailed worker when API configuration fails", async t => {
   const f = await fixture(t);
   const original = f.provider.start;
