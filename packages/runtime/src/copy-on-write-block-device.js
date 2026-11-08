@@ -1,5 +1,5 @@
 import { constants as fsConstants } from "node:fs";
-import { mkdir, lstat, open, unlink } from "node:fs/promises";
+import { mkdir, lstat, open, unlink, copyFile, chmod } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { BLOCK_SECTOR_SIZE } from "./block-device.js";
@@ -132,6 +132,50 @@ export class CopyOnWriteBlockDevice {
     }
     for (const [position, value] of changedBytes) {
       await writeAll(this.#handle, Buffer.from([value]), position);
+    }
+  }
+
+  /** Create an exclusive, durable point-in-time overlay copy. Caller must quiesce guest writes. */
+  async createSnapshot(snapshotPath) {
+    this.#assertOpen();
+    if (typeof snapshotPath !== "string" || !path.isAbsolute(snapshotPath)
+      || snapshotPath === this.filePath) throw new TypeError("Snapshot path must be a distinct absolute path");
+    await this.sync();
+    await copyFile(this.filePath, snapshotPath, fsConstants.COPYFILE_EXCL);
+    try {
+      await chmod(snapshotPath, 0o600);
+      const snapshot = await open(snapshotPath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+      try {
+        const stat = await snapshot.stat();
+        if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) throw new Error("Snapshot must be a private regular file");
+        await snapshot.sync();
+      } finally { await snapshot.close(); }
+      return Object.freeze({ path: snapshotPath, sectors: this.sectors, baseDigest: this.baseDigest, format: "nexara-cow-v1" });
+    } catch (error) {
+      await unlink(snapshotPath).catch(() => {});
+      throw error;
+    }
+  }
+
+  /** Restore a snapshot into a new VM overlay; never overwrites an existing overlay. */
+  static async restore({ snapshotPath, directory, vmId, sectors, baseDigest, baseDevice } = {}) {
+    if (typeof snapshotPath !== "string" || !path.isAbsolute(snapshotPath)) throw new TypeError("Snapshot path must be absolute");
+    const source = await lstat(snapshotPath);
+    if (!source.isFile() || source.isSymbolicLink() || source.nlink !== 1 || (source.mode & 0o077) !== 0) {
+      throw new Error("Snapshot must be a private regular file with one link and mode 0600");
+    }
+    const targetDirectory = await lstat(directory);
+    if (!targetDirectory.isDirectory() || targetDirectory.isSymbolicLink() || (targetDirectory.mode & 0o077) !== 0) {
+      throw new Error("Restore target must be a private directory");
+    }
+    const targetPath = path.join(directory, vmId + ".overlay");
+    await copyFile(snapshotPath, targetPath, fsConstants.COPYFILE_EXCL);
+    try {
+      await chmod(targetPath, 0o600);
+      return await CopyOnWriteBlockDevice.open({ directory, vmId, sectors, baseDigest, baseDevice, create: false });
+    } catch (error) {
+      await unlink(targetPath).catch(() => {});
+      throw error;
     }
   }
 
