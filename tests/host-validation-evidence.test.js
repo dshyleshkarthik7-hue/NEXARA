@@ -25,7 +25,7 @@ test("all Linux host validation scripts pass bash syntax checking", () => {
   }
 });
 
-test("two-boot evidence verifier accepts matching guest and firewall evidence", async t => {
+test("two-boot evidence verifier accepts two-boot guest persistence evidence", async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), "nexara-host-evidence-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const first = path.join(root, "first.log");
