@@ -43,10 +43,10 @@ test("ATA PIO writes and reads one LBA28 sector through the data register", () =
   assert.equal(ata.read(0x1f3), 0x24n);
 });
 
-test("ATA PIO rejects unsupported multi-sector, non-LBA and out-of-range commands", () => {
+test("ATA PIO rejects non-LBA and out-of-range commands", () => {
   const ata = new AtaPioDevice({ disk: new MemoryBlockDevice({ sectors: 8 }) });
-  ata.write(0x1f2, 2);
-  ata.write(0x1f6, 0xe0);
+  ata.write(0x1f2, 1);
+  ata.write(0x1f6, 0x00);
   ata.write(0x1f7, 0x20);
   assert.equal(ata.read(0x1f7), 0x41n);
   assert.equal(ata.read(0x1f1), 0x04n);
@@ -55,7 +55,6 @@ test("ATA PIO rejects unsupported multi-sector, non-LBA and out-of-range command
   ata.write(0x1f7, 0x20);
   assert.equal(ata.read(0x1f7), 0x41n);
 });
-
 test("ATA PIO rejects writes to a read-only backing disk", () => {
   const ata = new AtaPioDevice({ disk: new MemoryBlockDevice({ sectors: 4, readOnly: true }) });
   setLba(ata, 0);
