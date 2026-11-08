@@ -84,7 +84,7 @@ Before claiming a production-ready Linux-capable microVM, the remaining release 
 - A clean CI build of Firecracker, jailer, static BusyBox, kernel, initramfs and persistent ext4 test disk, followed by bundle checksum/format verification.
 - A real KVM two-boot run proving the same ext4 disk persists data across Firecracker restarts.
 - Live verification of jailer-applied seccomp, NoNewPrivs, non-root identity, namespaces and cgroup limits on the dedicated runner.
-- A separately measured host firewall/TAP policy test; no guest egress-blocking claim is made by the current guest image.
+- A separately measured host network-namespace firewall probe and, later, a TAP-attached guest network test; no guest egress-blocking claim is made by the current guest image.
 - Adversarial lifecycle, image-intake, network-policy and isolation tests, plus independent security review.
 - Firmware/bootloader support, broader x86 and virtual-device compatibility, broker integration into the actual VM device path, and an unmodified Linux guest boot remain separate product milestones and are not delivered by the current smoke test.
 
