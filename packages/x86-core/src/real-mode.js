@@ -23,6 +23,7 @@ export class X86RealModeCpu {
     if (interruptHandler !== null && typeof interruptHandler !== "function") throw new TypeError("interruptHandler must be a function");
     this.a20Enabled = Boolean(a20Enabled);
     this.interruptHandler = interruptHandler;
+    this.segmentOverride = null;
     this.halted = false;
     this.instructionsExecuted = 0;
   }
@@ -61,6 +62,20 @@ export class X86RealModeCpu {
       (result === 0 ? ZF : 0) | (result & 0x8000 ? SF : 0) |
       (([0,1,2,3,4,5,6,7].filter(bit => (result >>> bit) & 1).length % 2 === 0) ? PF : 0) | 2;
   }
+  #setAddFlags(left, right, bits = 16) {
+    const mask = bits === 8 ? 0xff : MASK16;
+    const sign = bits === 8 ? 0x80 : 0x8000;
+    const a = left & mask, b = right & mask;
+    const wide = a + b, result = wide & mask;
+    this.flags = (this.flags & ~(CF | PF | AF | ZF | SF | OF)) |
+      (wide > mask ? CF : 0) |
+      (((a ^ b ^ result) & 0x10) ? AF : 0) |
+      (result === 0 ? ZF : 0) | (result & sign ? SF : 0) |
+      (([0,1,2,3,4,5,6,7].filter(bit => (result >>> bit) & 1).length % 2 === 0) ? PF : 0) |
+      ((~(a ^ b) & (a ^ result) & sign) ? OF : 0) | 2;
+    return result;
+  }
+
   #setSubFlags(left, right, bits = 16) {
     const mask = bits === 8 ? 0xff : MASK16;
     const sign = bits === 8 ? 0x80 : 0x8000;
@@ -125,7 +140,8 @@ export class X86RealModeCpu {
     }
     const base = mod === 0 && rm === 6 ? 0 : bases[rm].reduce((sum, value) => sum + value, 0);
     const offset = (base + displacement) & MASK16;
-    const segment = rm === 2 || rm === 3 || (rm === 6 && mod !== 0) ? this.ss : this.ds;
+    const defaultSegment = rm === 2 || rm === 3 || (rm === 6 && mod !== 0) ? this.ss : this.ds;
+    const segment = this.segmentOverride === null ? defaultSegment : this.segmentOverride;
     return {
       reg,
       read: () => width === 8 ? this.#read8(segment, offset) : this.#read16(segment, offset),
@@ -139,7 +155,7 @@ export class X86RealModeCpu {
     const count = repeat ? this.cx : 1;
     for (let i = 0; i < count; i++) {
       if (opcode === 0xa4 || opcode === 0xa5) {
-        const value = width === 1 ? this.#read8(this.ds, this.si) : this.#read16(this.ds, this.si);
+        const value = width === 1 ? this.#read8(this.segmentOverride ?? this.ds, this.si) : this.#read16(this.segmentOverride ?? this.ds, this.si);
         if (width === 1) this.#write8(this.es, this.di, value);
         else this.#write16(this.es, this.di, value);
         this.si = (this.si + delta) & MASK16;
@@ -149,8 +165,8 @@ export class X86RealModeCpu {
         else this.#write16(this.es, this.di, this.ax);
         this.di = (this.di + delta) & MASK16;
       } else if (opcode === 0xac || opcode === 0xad) {
-        if (width === 1) this.#setReg8(0, this.#read8(this.ds, this.si));
-        else this.ax = this.#read16(this.ds, this.si);
+        if (width === 1) this.#setReg8(0, this.#read8(this.segmentOverride ?? this.ds, this.si));
+        else this.ax = this.#read16(this.segmentOverride ?? this.ds, this.si);
         this.si = (this.si + delta) & MASK16;
       } else {
         return false;
@@ -168,8 +184,10 @@ export class X86RealModeCpu {
     const start = this.ip;
     let opcode = this.#fetch8();
     let repeat = false;
-    if (opcode === 0xf3 || opcode === 0xf2) {
-      repeat = true;
+    this.segmentOverride = null;
+    while ([0xf2, 0xf3, 0x26, 0x2e, 0x36, 0x3e].includes(opcode)) {
+      if (opcode === 0xf2 || opcode === 0xf3) repeat = true;
+      else this.segmentOverride = ({ 0x26: this.es, 0x2e: this.cs, 0x36: this.ss, 0x3e: this.ds })[opcode];
       opcode = this.#fetch8();
     }
     if (opcode === 0x90) {
@@ -215,6 +233,25 @@ export class X86RealModeCpu {
       if (opcode === 0x31 || opcode === 0x89) operand.write(result);
       else this.#setReg16(operand.reg, opcode === 0x33 ? result : operand.read());
       if (opcode === 0x31 || opcode === 0x33) this.#setLogicFlags(result);
+    } else if ([0x00,0x01,0x02,0x03,0x28,0x29,0x2a,0x2b,0x38,0x39,0x3a,0x3b].includes(opcode)) {
+      const width = (opcode & 1) ? 16 : 8;
+      const operand = this.#decodeRm(this.#fetch8(), width);
+      const directionToReg = Boolean(opcode & 2);
+      const family = opcode & 0x38;
+      const left = directionToReg ? (width === 8 ? this.#reg8(operand.reg) : this.#reg16(operand.reg)) : operand.read();
+      const right = directionToReg ? operand.read() : (width === 8 ? this.#reg8(operand.reg) : this.#reg16(operand.reg));
+      if (family === 0x00) {
+        const result = this.#setAddFlags(left, right, width);
+        if (directionToReg) width === 8 ? this.#setReg8(operand.reg, result) : this.#setReg16(operand.reg, result);
+        else operand.write(result);
+      } else if (family === 0x28) {
+        const result = (left - right) & (width === 8 ? 0xff : MASK16);
+        this.#setSubFlags(left, right, width);
+        if (directionToReg) width === 8 ? this.#setReg8(operand.reg, result) : this.#setReg16(operand.reg, result);
+        else operand.write(result);
+      } else {
+        this.#setSubFlags(left, right, width);
+      }
     } else if (opcode === 0x88 || opcode === 0x8a) {
       const operand = this.#decodeRm(this.#fetch8(), 8);
       if (opcode === 0x88) operand.write(this.#reg8(operand.reg));
@@ -284,9 +321,11 @@ export class X86RealModeCpu {
       this.cs = this.#pop();
       this.flags = (this.#pop() | 2) & 0x0fff;
     } else {
+      this.segmentOverride = null;
       this.ip = start;
       throw new Error("Unsupported real-mode opcode 0x" + opcode.toString(16).padStart(2, "0") + " at 0x" + start.toString(16));
     }
+    this.segmentOverride = null;
     this.instructionsExecuted++;
     return Object.freeze({ state: this.halted ? "halted" : "running", ip: this.ip, instructionPointer: start });
   }
