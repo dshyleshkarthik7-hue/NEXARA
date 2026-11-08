@@ -1,31 +1,70 @@
-name: NEXARA Linux host validation
-
+name: NEXARA jailed Firecracker KVM validation
 on:
+  workflow_run:
+    workflows: ["Build NEXARA host binaries and guest kernel"]
+    types: [completed]
   workflow_dispatch:
-
 permissions:
+  actions: read
   contents: read
-
 jobs:
-  host-validation:
-    # Configure a dedicated, ephemeral self-hosted runner with these labels.
-    # Never run this privileged job on pull requests or untrusted branches.
+  real-kvm-two-boot:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: [self-hosted, linux, x64, kvm, nexara-host-validation]
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out trusted main branch
         uses: actions/checkout@v4
         with:
           ref: main
           persist-credentials: false
-      - name: Validate KVM, cgroup v2, seccomp and default-deny network namespace
+      - name: Download successful native build artifact
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: nexara-microvm-bundle-linux-x86_64
+          path: dist/host-binaries
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Require externally prepared cgroup delegation
         env:
-          FIRECRACKER_BIN: ${{ vars.FIRECRACKER_BIN }}
-          JAILER_BIN: ${{ vars.JAILER_BIN }}
+          NEXARA_JAILER_PARENT_CGROUP: ${{ vars.NEXARA_JAILER_PARENT_CGROUP }}
         run: |
-          sudo -E env FIRECRACKER_BIN="$FIRECRACKER_BIN" JAILER_BIN="$JAILER_BIN" bash scripts/host-validation.sh
-      - name: Publish host prerequisite and firewall probe result
+          test -n "$NEXARA_JAILER_PARENT_CGROUP"
+          test -d "/sys/fs/cgroup/$NEXARA_JAILER_PARENT_CGROUP"
+          echo "Using delegated cgroup parent: $NEXARA_JAILER_PARENT_CGROUP"
+      - name: Verify downloaded native bundle
+        run: |
+          cd dist/host-binaries
+          sha256sum -c SHA256SUMS
+          cd ../..
+          sudo env NEXARA_BINARY_OUT="$GITHUB_WORKSPACE/dist/host-binaries" bash scripts/verify-host-bundle.sh
+      - name: Run host KVM and network namespace preflight
+        env:
+          FIRECRACKER_BIN: ${{ github.workspace }}/dist/host-binaries/firecracker
+          JAILER_BIN: ${{ github.workspace }}/dist/host-binaries/jailer
+        run: sudo -E env FIRECRACKER_BIN="$FIRECRACKER_BIN" JAILER_BIN="$JAILER_BIN" bash scripts/host-validation.sh
+      - name: Run two real jailed guest boots and persistence check
+        env:
+          NEXARA_JAILER_PARENT_CGROUP: ${{ vars.NEXARA_JAILER_PARENT_CGROUP }}
+          NEXARA_JAILER_UID: ${{ vars.NEXARA_JAILER_UID }}
+          NEXARA_JAILER_GID: ${{ vars.NEXARA_JAILER_GID }}
+        run: |
+          sudo -E env \
+            NEXARA_JAILER_PARENT_CGROUP="$NEXARA_JAILER_PARENT_CGROUP" \
+            NEXARA_JAILER_UID="${NEXARA_JAILER_UID:-12345}" \
+            NEXARA_JAILER_GID="${NEXARA_JAILER_GID:-12345}" \
+            NEXARA_KVM_WORKDIR="$RUNNER_TEMP/nexara-kvm-validation" \
+            bash scripts/run-firecracker-two-boot.sh "$GITHUB_WORKSPACE/dist/host-binaries"
+      - name: Upload real KVM evidence
         if: always()
-        run: |
-          echo "Host prerequisite probe completed. This is not a Firecracker guest boot test." >> "$GITHUB_STEP_SUMMARY"
-          echo "For full validation, run the trusted two-boot guest harness and scripts/collect-host-validation-evidence.sh on this KVM runner." >> "$GITHUB_STEP_SUMMARY"
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexara-real-kvm-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexara-kvm-validation/evidence/
+          if-no-files-found: warn
+          retention-days: 90
