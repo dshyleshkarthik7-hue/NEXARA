@@ -41,6 +41,8 @@ export class CopyOnWriteBlockDevice {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const root = await lstat(directory);
     if (!root.isDirectory() || root.isSymbolicLink()) throw new Error("Overlay storage root must be a real directory");
+    const actualBaseDigest = await digestDevice(baseDevice, sectors);
+    if (actualBaseDigest !== baseDigest) throw new Error("Base image digest does not match immutable disk contents");
     const filePath = path.join(directory, vmId + ".overlay");
     const flags = fsConstants.O_RDWR | (fsConstants.O_NOFOLLOW ?? 0);
     let handle;
@@ -86,7 +88,6 @@ export class CopyOnWriteBlockDevice {
     this.#assertOpen();
     this.#range(lba, count);
     const result = Buffer.from(await this.#base.readSectors(lba, count));
-    const bitmap = Buffer.alloc(Math.ceil(count / 8));
     // Read individual bitmap bytes; adjacent sectors share a bitmap byte.
     for (let i = 0; i < count; i++) {
       const sector = lba + i;
@@ -174,4 +175,18 @@ async function writeAll(handle, buffer, position) {
     if (result.bytesWritten === 0) throw new Error("Copy-on-write overlay write made no progress");
     offset += result.bytesWritten;
   }
+}
+
+async function digestDevice(device, sectors) {
+  const hash = createHash("sha256");
+  const chunkSectors = 2048;
+  for (let lba = 0; lba < sectors; lba += chunkSectors) {
+    const count = Math.min(chunkSectors, sectors - lba);
+    const bytes = await device.readSectors(lba, count);
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength !== count * BLOCK_SECTOR_SIZE) {
+      throw new Error("Base image returned invalid data while verifying its digest");
+    }
+    hash.update(bytes);
+  }
+  return "sha256:" + hash.digest("hex");
 }
