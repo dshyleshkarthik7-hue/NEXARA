@@ -16,7 +16,6 @@ export class LinuxJailerProvider {
   #chrootBaseDir;
   #uid;
   #gid;
-  #netnsPath;
   #parentCgroup;
   #spawn;
   #stopTimeoutMs;
@@ -24,10 +23,10 @@ export class LinuxJailerProvider {
 
   constructor({
     jailerPath, firecrackerPath, chrootBaseDir = "/srv/jailer",
-    uid, gid, netnsPath, parentCgroup = "nexara",
+    uid, gid, parentCgroup = "nexara",
     spawn = nodeSpawn, stopTimeoutMs = 5000, networkProvider
   } = {}) {
-    for (const [name, value] of Object.entries({ jailerPath, firecrackerPath, chrootBaseDir, netnsPath })) {
+    for (const [name, value] of Object.entries({ jailerPath, firecrackerPath, chrootBaseDir })) {
       if (typeof value !== "string" || !path.isAbsolute(value)) throw new TypeError(name + " must be an absolute path");
     }
     if (!Number.isSafeInteger(uid) || uid < 1 || !Number.isSafeInteger(gid) || gid < 1
@@ -42,7 +41,6 @@ export class LinuxJailerProvider {
     this.#chrootBaseDir = chrootBaseDir;
     this.#uid = uid;
     this.#gid = gid;
-    this.#netnsPath = netnsPath;
     this.#parentCgroup = parentCgroup;
     this.#spawn = spawn;
     this.#stopTimeoutMs = stopTimeoutMs;
