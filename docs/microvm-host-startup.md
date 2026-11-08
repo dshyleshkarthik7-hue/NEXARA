@@ -25,11 +25,12 @@ await server.listen({ host: "127.0.0.1", port: 8788 });
 server.addHook("onClose", async () => host.close());
 ```
 
-The provider and all adapter callbacks are host-trusted dependencies. In particular, `resolveBaseDevice(digest)` must return a read-only block device whose bytes hash to that digest; it must not accept guest-supplied paths. `authorizeVmRequest({ identity, request })` must enforce tenant quotas, image allowlists, capability grants, egress policy, and lease duration, returning the server-approved policy. The API never signs privileges directly from client input.
+The provider and all adapter callbacks are host-trusted dependencies. In particular, `resolveBaseDevice(digest)` must return a read-only block device whose bytes hash to that digest; it must not accept guest-supplied paths. `authorizeVmRequest({ identity, request })` must enforce tenant quotas, image allowlists, capability grants, egress policy, lease duration, and return a stable `workloadKey` issued by the trusted control plane. The workload key must not come from guest-controlled or arbitrary client fields. It is hashed before persistence and bound to one tenant subject and image digest; rebinding is rejected. The API never signs privileges directly from client input.
 
 ## Persistent state layout
 
-- `stateDirectory/vm-registry/<vm-uuid>.json`: host-owned VM identity, sector geometry, immutable base digest, and overlay filename.
+- `stateDirectory/vm-registry/<vm-uuid>.json`: host-owned VM storage record (sector geometry, immutable base digest, and overlay filename).
+- `stateDirectory/vm-registry/identity-<sha256(workload-key)>.json`: stable host-generated VM UUID bound to the authenticated tenant subject and image digest.
 - `overlayDirectory/<vm-uuid>.overlay`: persistent copy-on-write guest disk.
 - `stateDirectory/disk-recovery/<record-uuid>.raw` and `.json`: staged guest disks awaiting write-back.
 
@@ -60,3 +61,12 @@ sudo env FIRECRACKER_BIN=/usr/bin/firecracker JAILER_BIN=/usr/bin/jailer bash sc
 The manually triggered GitHub Actions workflow `.github/workflows/host-validation.yml` requires a dedicated self-hosted runner labeled `self-hosted, linux, x64, kvm, nexara-host-validation`, with passwordless sudo and repository variables `FIRECRACKER_BIN` and `JAILER_BIN` set to trusted absolute executable paths. Do not attach this label to a shared or untrusted runner. The workflow is intentionally `workflow_dispatch` only; it does not execute privileged host operations for pull requests.
 
 This preflight is not a Firecracker guest boot test. It does not establish that the configured jailer actually installs the expected seccomp filter, cgroup limits, or guest device isolation. Those require a separate disposable KVM host test that launches the configured jailer and Firecracker process, inspects the live process/cgroup/network state, boots a known test guest, performs guest disk writes, and validates persistence after a host restart. Do not infer those results from this preflight passing.
+
+
+## Stable VM identity and restart path
+
+The production bootstrap wires `PersistentVmRegistry.getOrCreateIdentity()` into `VmSupervisor.resolveVmIdentity`. VM creation therefore requires the trusted control-plane `workloadKey`. The same key, subject and image digest resolve to the same host-generated UUID after restart. The root-disk factory uses `openOrCreate()`: it opens the registered overlay when present and creates it only for a first-time identity. Geometry or base-image changes for an existing UUID fail closed.
+
+The server's `POST /api/vms` route now requires `workloadKey` in the policy returned by the trusted `authorizeVmRequest` adapter and passes it to the supervisor. Existing adapters must be updated to return this key from their authenticated workload mapping. The host calls `supervisor.initialize()` and replays the durable journal before `createMicroVmHost()` resolves; only then should the server listen.
+
+The identity is intentionally not a substitute for a distributed scheduler lock: run one active host owner per VM identity, or add a shared lease/consensus service before multi-host placement.
