@@ -6,6 +6,8 @@ on:
       - "scripts/build-host-binaries.sh"
       - "scripts/build-firecracker-kernel.sh"
       - "scripts/build-firecracker-guest-initramfs.sh"
+      - "scripts/build-firecracker-test-disk.sh"
+      - "scripts/verify-host-bundle.sh"
       - ".github/workflows/build-host-binaries.yml"
       - "docs/FIRECRACKER-GUEST-IMAGE.md"
 permissions:
