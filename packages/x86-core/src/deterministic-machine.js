@@ -1,3 +1,4 @@
+import { canonicalJson } from "../../machine-format/src/index.js";
 import { DeterministicEventLog } from "../../machine-format/src/event-log.js";
 import { X86InterpreterBackend } from "./backend.js";
 
@@ -25,10 +26,7 @@ function cloneState(state) {
   };
 }
 
-/**
- * Explicit async deterministic facade around the reference interpreter.
- * Every guest instruction is re-executed and checked during replay.
- */
+/** Explicit async deterministic facade around the reference interpreter. */
 export class DeterministicX86Machine {
   constructor(machine, configuration, eventLog = new DeterministicEventLog()) {
     this.machine = machine;
@@ -45,12 +43,10 @@ export class DeterministicX86Machine {
 
   async loadProgram(bytes, options = {}) {
     if (!(bytes instanceof Uint8Array)) throw new TypeError("Program must be a Uint8Array");
-    const result = this.machine.loadProgram(bytes, options);
-    await this.eventLog.append("program.load", {
-      bytes: Array.from(bytes),
-      address: options.address ?? 0,
-      entryPoint: options.entryPoint ?? options.address ?? 0
-    });
+    const address = options.address ?? 0;
+    const entryPoint = options.entryPoint ?? address;
+    const result = this.machine.loadProgram(bytes, { ...options, address, entryPoint });
+    await this.eventLog.append("program.load", { bytes: Array.from(bytes), address, entryPoint });
     return result;
   }
 
@@ -80,12 +76,12 @@ export class DeterministicX86Machine {
   exportRecording() { return this.eventLog.export(); }
 
   snapshot() {
-    return Object.freeze({
+    return {
       format: "nexara-deterministic-snapshot-v1",
       configuration: { ...this.configuration },
       state: cloneState(this.machine.saveState()),
       eventLog: this.eventLog.export()
-    });
+    };
   }
 
   static async restore(snapshot, backend = new X86InterpreterBackend()) {
@@ -106,7 +102,7 @@ export class DeterministicX86Machine {
   static async replay(bundle, configuration = {}, backend = new X86InterpreterBackend()) {
     const verifiedLog = await DeterministicEventLog.import(bundle);
     const machine = await backend.createMachine(configuration);
-    const replayed = [];
+    let instructionsReplayed = 0;
     await verifiedLog.replay({
       "program.load": async event => {
         const { bytes, address, entryPoint } = event.payload;
@@ -114,27 +110,23 @@ export class DeterministicX86Machine {
           throw new Error("Recording contains invalid program bytes");
         }
         machine.loadProgram(Uint8Array.from(bytes), { address, entryPoint });
-        replayed.push(event.sequence);
       },
       marker: async event => {
         if (event.payload?.kind !== "cpu.step") return;
         machine.step();
         const actual = fingerprint(machine);
-        if (canonicalFingerprint(actual) !== canonicalFingerprint(event.payload.state)) {
+        if (canonicalJson(actual) !== canonicalJson(event.payload.state)) {
           throw new Error(`Deterministic replay diverged at event ${event.sequence}`);
         }
-        replayed.push(event.sequence);
+        instructionsReplayed++;
       }
     });
     return Object.freeze({
       machine,
-      eventsReplayed: replayed.length,
+      eventsReplayed: verifiedLog.length,
+      instructionsReplayed,
       eventLogHead: verifiedLog.head,
       state: fingerprint(machine)
     });
   }
-}
-
-function canonicalFingerprint(value) {
-  return JSON.stringify(value, Object.keys(value).sort());
 }
