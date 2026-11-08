@@ -164,6 +164,7 @@ export class FirecrackerDriver {
         await chmod(handle.materializedRootfs, 0o600);
         try {
           await handle.rootfsDevice.importRaw(handle.materializedRootfs);
+          handle.writebackPending = false;
         } catch (writebackError) {
           // Queue a durable copy before removing the jail-local recovery image.
           if (!this.#recoveryJournal) {
