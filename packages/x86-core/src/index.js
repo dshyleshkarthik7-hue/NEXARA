@@ -265,8 +265,7 @@ export class X86Cpu {
       // validation failures are reported as #GP for this supported subset;
       // finer #TS/#NP/#SS classification requires typed descriptor faults.
       if (error instanceof PageFault) {
-        const errorCode = (error.present ? 1 : 0) | (error.write ? 2 : 0) | (error.user ? 4 : 0);
-        throw new CpuFault("Task switch page fault: " + detail, this.ip, { vector: 14, errorCode, cause: error });
+        throw new CpuFault("Task switch page fault: " + detail, this.ip, { vector: 14, errorCode: error.errorCode, cause: error });
       }
       throw new CpuFault("Task switch failed: " + detail, this.ip, { vector: 13, errorCode: 0, cause: error });
     }
