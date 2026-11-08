@@ -346,7 +346,7 @@ export class X86RealModeCpu {
       const operand = this.#decodeRm(this.#fetch8(), 8);
       if (opcode === 0x88) operand.write(this.#reg8(operand.reg));
       else this.#setReg8(operand.reg, operand.read());
-    } else if (opcode === 0xa4 || opcode === 0xa5 || opcode === 0xaa || opcode === 0xab || opcode === 0xac || opcode === 0xad) {
+    } else if (opcode === 0xa4 || opcode === 0xa5 || opcode === 0xaa || opcode === 0xab || opcode === 0xac || opcode === 0xad || opcode === 0xa6 || opcode === 0xa7 || opcode === 0xae || opcode === 0xaf) {
       if (!this.#stringInstruction(opcode, repeat)) throw new Error("Unsupported string operation");
     } else if (opcode === 0x3d) {
       this.#setSubFlags(this.ax, this.#fetch16());
