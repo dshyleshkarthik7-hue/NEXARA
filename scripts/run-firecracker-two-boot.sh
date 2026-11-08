@@ -78,13 +78,13 @@ run_boot(){
   [[ -n "$fc_pid" ]] || fail "Firecracker exited before live jail verification"
   NEXARA_CGROUP_PREFIX=nexara bash "$(dirname "$0")/verify-jailed-process.sh" "$fc_pid"
   cp "$log" "$work/boot-$number.serial.log.saved"
-  kill "$jailer_pid" 2>/dev/null || true
-  wait "$jailer_pid" 2>/dev/null || true
+  kill -TERM "$fc_pid" 2>/dev/null || true
   for _ in $(seq 1 50); do
     pgrep -x firecracker >/dev/null || break
     sleep 0.1
   done
-  pgrep -x firecracker >/dev/null && { pkill -x firecracker || true; fail "Firecracker did not exit cleanly"; }
+  pgrep -x firecracker >/dev/null && { pkill -KILL -x firecracker || true; fail "Firecracker did not exit"; }
+  wait "$jailer_pid" 2>/dev/null || true
   cp "$jailroot/rootfs.ext4" "$work/persistent.ext4"
   rm -rf -- "$base/firecracker/$id"
   echo "PASS: boot $number completed under jailer; persistent disk captured"
