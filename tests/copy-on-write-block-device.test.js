@@ -12,14 +12,14 @@ const digestOf = bytes => "sha256:" + createHash("sha256").update(bytes).digest(
 test("copy-on-write disk reads base sectors until changed and persists overlay writes", async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "nexara-cow-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const base = await FileBlockDevice.open({ directory, vmId: "base-12345678-1234", sectors: 16 });
+  const base = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 16 });
   const baseBytes = new Uint8Array(16 * 512);
   baseBytes.fill(0x31);
   await base.writeSectors(0, baseBytes);
   await base.sync();
   await base.close();
   const immutableBase = await FileBlockDevice.open({
-    directory, vmId: "base-12345678-1234", sectors: 16, readOnly: true, create: false
+    directory, vmId: "ba5e1234-1234-1234", sectors: 16, readOnly: true, create: false
   });
   let overlay = await CopyOnWriteBlockDevice.open({
     directory, vmId: "12345678-1234-4234-8234-123456789abc",
@@ -45,14 +45,14 @@ test("copy-on-write disk reads base sectors until changed and persists overlay w
 test("copy-on-write disk rejects base mismatch, writable base and out-of-range writes", async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "nexara-cow-invalid-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const base = await FileBlockDevice.open({ directory, vmId: "base-12345678-1234", sectors: 4 });
+  const base = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 4 });
   await assert.rejects(() => CopyOnWriteBlockDevice.open({
     directory, vmId: "12345678-1234-4234-8234-123456789abc",
     sectors: 4, baseDigest: digest, baseDevice: base
   }), /base device must be read-only/);
   await base.close();
   const readOnly = await FileBlockDevice.open({
-    directory, vmId: "base-12345678-1234", sectors: 4, readOnly: true, create: false
+    directory, vmId: "ba5e1234-1234-1234", sectors: 4, readOnly: true, create: false
   });
   const zeroDigest = digestOf(new Uint8Array(4 * 512));
   const overlay = await CopyOnWriteBlockDevice.open({
@@ -84,11 +84,11 @@ test("copy-on-write disk works through the lease capability broker", async t => 
   const broker = new VmCapabilityBroker({
     authority, envelope, subject: "cow-tenant", imageDigest, clock: () => 110
   });
-  const base = await FileBlockDevice.open({ directory, vmId: "base-12345678-1234", sectors: 8 });
+  const base = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 8 });
   await base.writeSectors(0, baseBytes);
   await base.close();
   const immutableBase = await FileBlockDevice.open({
-    directory, vmId: "base-12345678-1234", sectors: 8, readOnly: true, create: false
+    directory, vmId: "ba5e1234-1234-1234", sectors: 8, readOnly: true, create: false
   });
   const overlay = await CopyOnWriteBlockDevice.open({
     directory, vmId: "12345678-1234-4234-8234-123456789abc",
