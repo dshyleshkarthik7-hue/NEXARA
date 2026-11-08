@@ -24,12 +24,22 @@ uid="${NEXARA_JAILER_UID:-12345}"; gid="${NEXARA_JAILER_GID:-12345}"
 [[ "$uid" =~ ^[1-9][0-9]+$ && "$gid" =~ ^[1-9][0-9]+$ ]] || fail "jailer UID/GID must be non-root numeric IDs"
 base="${NEXARA_JAILER_BASE:-/srv/jailer}"
 work="${NEXARA_KVM_WORKDIR:-/var/tmp/nexara-two-boot}"
-ns="nexara-$RANDOM-$$"
+ns="nexara-$RANDOM-$"
+ACTIVE_JAILER_PID=""
+ACTIVE_FIRECRACKER_PID=""
 mkdir -m 0700 -p "$work" "$base"
 chmod 0755 "$base"
 ip netns add "$ns"
 cleanup(){
-  for p in $(pgrep -x firecracker 2>/dev/null || true); do kill "$p" 2>/dev/null || true; done
+  # Only stop processes launched by this invocation. Never signal unrelated
+  # Firecracker VMs that may share the dedicated validation host.
+  if [[ -n "$ACTIVE_FIRECRACKER_PID" ]]; then
+    kill "$ACTIVE_FIRECRACKER_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$ACTIVE_JAILER_PID" ]]; then
+    kill "$ACTIVE_JAILER_PID" 2>/dev/null || true
+    wait "$ACTIVE_JAILER_PID" 2>/dev/null || true
+  fi
   ip netns del "$ns" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -54,18 +64,23 @@ run_boot(){
     -- --api-sock /run/firecracker.socket >"$log" 2>&1 &
   local jailer_pid=$!
   local fc_pid=""
+  ACTIVE_JAILER_PID="$jailer_pid"
+  ACTIVE_FIRECRACKER_PID=""
   for _ in $(seq 1 100); do
     [[ -S "$sock" ]] && break
     kill -0 "$jailer_pid" 2>/dev/null || { cat "$log" >&2; fail "jailer exited before API socket creation"; }
     sleep 0.1
   done
   [[ -S "$sock" ]] || { cat "$log" >&2; fail "Firecracker API socket did not appear"; }
+  # The upstream jailer supervises its Firecracker child. Resolve the child
+  # from this jailer PID rather than selecting an arbitrary host-wide match.
   for _ in $(seq 1 50); do
-    fc_pid="$(pgrep -x firecracker | head -n1 || true)"
+    fc_pid="$(pgrep -P "$jailer_pid" -x firecracker | head -n1 || true)"
     [[ -n "$fc_pid" ]] && break
     sleep 0.1
   done
-  [[ -n "$fc_pid" ]] || fail "cannot identify live Firecracker PID"
+  [[ -n "$fc_pid" ]] || fail "cannot identify Firecracker child of jailer PID $jailer_pid"
+  ACTIVE_FIRECRACKER_PID="$fc_pid"
   api(){ curl --fail --silent --show-error --unix-socket "$sock" -X PUT "http://localhost$1" -H 'Content-Type: application/json' -d "$2" >/dev/null; }
   api /boot-source '{"kernel_image_path":"/vmlinux.bin","initrd_path":"/initramfs.cpio.gz","boot_args":"console=ttyS0 reboot=k panic=1 pci=off"}'
   api /drives/rootfs '{"drive_id":"rootfs","path_on_host":"/rootfs.ext4","is_root_device":true,"is_read_only":false}'
@@ -79,17 +94,22 @@ run_boot(){
     sleep 0.1
   done
   (( complete == 1 )) || { cat "$log" >&2; fail "guest boot $number did not complete"; }
-  fc_pid="$(pgrep -x firecracker | head -n1 || true)"
-  [[ -n "$fc_pid" ]] || fail "Firecracker exited before live jail verification"
+  fc_pid="$(pgrep -P "$jailer_pid" -x firecracker | head -n1 || true)"
+  [[ -n "$fc_pid" ]] || fail "Firecracker child exited before live jail verification"
   NEXARA_CGROUP_PREFIX=nexara bash "$(dirname "$0")/verify-jailed-process.sh" "$fc_pid"
   cp "$log" "$work/boot-$number.serial.log.saved"
   kill -TERM "$fc_pid" 2>/dev/null || true
   for _ in $(seq 1 50); do
-    pgrep -x firecracker >/dev/null || break
+    kill -0 "$fc_pid" 2>/dev/null || break
     sleep 0.1
   done
-  pgrep -x firecracker >/dev/null && { pkill -KILL -x firecracker || true; fail "Firecracker did not exit"; }
+  if kill -0 "$fc_pid" 2>/dev/null; then
+    kill -KILL "$fc_pid" 2>/dev/null || true
+    fail "Firecracker child $fc_pid did not exit"
+  fi
   wait "$jailer_pid" 2>/dev/null || true
+  ACTIVE_FIRECRACKER_PID=""
+  ACTIVE_JAILER_PID=""
   cp "$jailroot/rootfs.ext4" "$work/persistent.ext4"
   rm -rf -- "$base/firecracker/$id"
   echo "PASS: boot $number completed under jailer; persistent disk captured"
