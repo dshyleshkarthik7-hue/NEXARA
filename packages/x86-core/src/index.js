@@ -152,6 +152,12 @@ export class X86Cpu {
     if (!Number.isSafeInteger(returnIp) || returnIp < 0 || returnIp > 0xffffffff) throw new CpuFault("Task return IP is outside 32-bit range", this.ip);
     const current = this.systemTables.task;
     if (!current.usable || !current.present || !current.busy || current.limit < 0x67) throw new CpuFault("Current TR must reference a usable busy 32-bit TSS", this.ip);
+    // A hardware task switch spans guest TSS memory, descriptor bytes, control
+    // registers, paging state, segment caches and the architectural register
+    // file. Keep a complete pre-switch checkpoint so an unexpected fault in
+    // the commit phase cannot expose a half-switched CPU or guest memory image.
+    // The snapshot is deliberately taken only after cheap argument/TR checks.
+    const rollbackState = this.saveState();
     try {
       const currentDescriptor = this.gdt.readSystemDescriptor(current.selector, { allowedTypes: [11] });
       if (currentDescriptor.base !== current.base || currentDescriptor.limit < 0x67n) throw new Error("Current TR does not match its busy GDT TSS descriptor");
@@ -240,8 +246,18 @@ export class X86Cpu {
       this.segments = nextSegments;
       return Object.freeze({ selector, ip: this.ip, cpl: this.segments.cpl, task: this.systemTables.snapshot().task });
     } catch (error) {
-      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & 0xffffffffn);
-      throw new CpuFault("Task switch failed: " + error.message, this.ip);
+      const faultAddress = error instanceof PageFault ? error.address : null;
+      let rollbackFailure = null;
+      try {
+        this.loadState(rollbackState);
+      } catch (restoreError) {
+        rollbackFailure = restoreError;
+      }
+      if (faultAddress !== null) this.controlRegisters.set(2, faultAddress & 0xffffffffn);
+      const detail = rollbackFailure
+        ? error.message + "; task-switch rollback failed: " + rollbackFailure.message
+        : error.message;
+      throw new CpuFault("Task switch failed: " + detail, this.ip);
     }
   }
   readControlRegister(index) {
