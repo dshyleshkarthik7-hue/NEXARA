@@ -15,7 +15,9 @@ test("Linux network provider creates an isolated TAP namespace with default-deny
   assert.equal(handle.tapName, "tap12345678");
   assert.equal(handle.netnsPath, "/run/netns/nx-1234567812");
   assert.deepEqual(calls[0], { command: "/sbin/ip", args: ["netns", "add", handle.name], input: undefined });
-  assert.ok(calls.some(call => call.args.includes("tuntap") && call.args.includes(handle.tapName)));
+  const tapCreate = calls.find(call => call.args.includes("tuntap"));
+  assert.ok(tapCreate.args.includes(handle.tapName));
+  assert.deepEqual(tapCreate.args.slice(-4), ["user", "10001", "group", "10001"]);
   const firewall = calls.find(call => call.command === "/sbin/ip" && call.args.includes("/sbin/nft"));
   assert.match(firewall.input, /policy drop/);
   assert.match(firewall.input, /ct state established,related accept/);
@@ -44,4 +46,22 @@ test("Linux network provider validates identity before running host commands", a
   const provider = new LinuxNetworkProvider({ run: async () => { calls++; } });
   await assert.rejects(() => provider.provision({ id: "../escape", uid: 0, gid: 0 }), /Invalid VM identity/);
   assert.equal(calls, 0);
+});
+
+
+test("Linux network provider retries namespace deletion when release initially fails", async () => {
+  let deletions = 0;
+  const provider = new LinuxNetworkProvider({
+    run: async (_command, args) => {
+      if (args[0] === "netns" && args[1] === "del" && ++deletions === 1) {
+        throw new Error("namespace busy");
+      }
+    }
+  });
+  const handle = await provider.provision({
+    id: "12345678-1234-4234-8234-123456789abc", uid: 10001, gid: 10002
+  });
+  await assert.rejects(() => provider.release(handle), /namespace busy/);
+  await provider.release(handle);
+  assert.equal(deletions, 2);
 });
