@@ -64,3 +64,21 @@ test("rejects issue-time overflow and malformed signatures", () => {
   assert.throws(() => authority.verify({ ...envelope, signature: "not-base64url" }, { now: 1100 }), /Malformed/);
   assert.throws(() => authority.verify(envelope, { now: -1 }), /Malformed/);
 });
+
+
+test("capability authorization verifies the signed lease before granting access", () => {
+  const authority = new VmLeaseAuthority(secret);
+  const envelope = authority.issue({
+    subject: "tenant-a", imageDigest: digest, capabilities: ["storage-read"]
+  }, { now: 20_000 });
+  const lease = authority.verifyCapability(envelope, "storage-read", {
+    now: 20_100, subject: "tenant-a", imageDigest: digest
+  });
+  assert.equal(lease.subject, "tenant-a");
+  assert.throws(() => authority.verifyCapability(envelope, "storage-write", { now: 20_100 }), /not granted/);
+  assert.throws(() => authority.verifyCapability(envelope, "storage-read", { now: 2_000_000 }), /expired/);
+  assert.throws(() => authority.verifyCapability({
+    ...envelope, payload: { ...envelope.payload, capabilities: ["storage-read", "network-egress"] }
+  }, "network-egress", { now: 20_100 }), /signature/);
+  assert.throws(() => authority.verifyCapability(envelope, "host-root", { now: 20_100 }), /Unknown/);
+});
