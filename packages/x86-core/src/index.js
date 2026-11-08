@@ -144,7 +144,7 @@ export class X86Cpu {
   switchTask(selector, { reason = "jmp", returnIp = this.ip } = {}) {
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Hardware task switching requires 32-bit protected mode", this.ip);
     if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n) throw new CpuFault("Task switching with paging enabled is not supported", this.ip);
-    if (!["jmp", "call", "task-gate"].includes(reason)) throw new CpuFault("Unsupported task-switch reason", this.ip);
+    if (!["jmp", "call", "task-gate", "iret-task"].includes(reason)) throw new CpuFault("Unsupported task-switch reason", this.ip);
     if (!Number.isInteger(selector) || selector <= 0 || selector > 0xffff || (selector & 4) !== 0) throw new CpuFault("Task switch requires a non-null GDT selector", this.ip);
     if (!Number.isSafeInteger(returnIp) || returnIp < 0 || returnIp > 0xffffffff) throw new CpuFault("Task return IP is outside 32-bit range", this.ip);
     const current = this.systemTables.task;
@@ -152,8 +152,8 @@ export class X86Cpu {
     try {
       const currentDescriptor = this.gdt.readSystemDescriptor(current.selector, { allowedTypes: [11] });
       if (currentDescriptor.base !== current.base || currentDescriptor.limit < 0x67n) throw new Error("Current TR does not match its busy GDT TSS descriptor");
-      const targetDescriptor = this.gdt.readSystemDescriptor(selector, { allowedTypes: [9] });
-      if (reason !== "task-gate" && Math.max(this.segments.cpl, selector & 3) > targetDescriptor.dpl) throw new Error("Task-switch selector privilege check failed");
+      const targetDescriptor = this.gdt.readSystemDescriptor(selector, { allowedTypes: reason === "iret-task" ? [11] : [9] });
+      if (["jmp", "call"].includes(reason) && Math.max(this.segments.cpl, selector & 3) > targetDescriptor.dpl) throw new Error("Task-switch selector privilege check failed");
       if (targetDescriptor.limit < 0x67n || targetDescriptor.base > 0xffffffffn) throw new Error("Target TSS must be a bounded 32-bit TSS with a 104-byte header");
       const targetTss = new X86Tss32(this.memory, { base: targetDescriptor.base, limit: Number(targetDescriptor.limit) });
       const incoming = targetTss.getTaskState();
@@ -188,11 +188,11 @@ export class X86Cpu {
           ds: this.segments.registers.ds.selector, fs: this.segments.registers.fs.selector, gs: this.segments.registers.gs.selector, ldt: this.systemTables.ldtr.selector }
       });
       // Descriptor writes and the CPU commit occur only after the incoming image validates.
-      const targetAccess = targetDescriptor.raw[5] | 2;
-      const currentAccess = reason === "jmp" ? currentDescriptor.raw[5] & ~2 : currentDescriptor.raw[5];
+      const targetAccess = reason === "iret-task" ? targetDescriptor.raw[5] : targetDescriptor.raw[5] | 2;
+      const currentAccess = (reason === "jmp" || reason === "iret-task") ? currentDescriptor.raw[5] & ~2 : currentDescriptor.raw[5];
       if (reason === "task-gate" || reason === "call") targetTss.backlink = current.selector;
       this.memory.write(Number(targetAccessAddress), Uint8Array.of(targetAccess));
-      if (reason === "jmp") this.memory.write(Number(currentAccessAddress), Uint8Array.of(currentAccess));
+      if (reason === "jmp" || reason === "iret-task") this.memory.write(Number(currentAccessAddress), Uint8Array.of(currentAccess));
       if (nextLdtr) this.systemTables.loadLdtr(nextLdtr); else this.systemTables.clearLdtr();
       this.systemTables.loadTaskRegister({ selector, base: targetDescriptor.base, limit: Number(targetDescriptor.limit), present: true, busy: true, usable: true });
       this.#syncDescriptorTables();
@@ -200,7 +200,7 @@ export class X86Cpu {
       this.writeControlRegister(3, incomingCr3);
       this.flags = (reason === "task-gate" || reason === "call")
         ? BigInt(incoming.eflags) | (1n << 14n)
-        : BigInt(incoming.eflags) & ~(1n << 14n); // CALL/task-gate switches establish nested-task state.
+        : reason === "jmp" ? BigInt(incoming.eflags) & ~(1n << 14n) : BigInt(incoming.eflags);
       this.ip = incoming.eip;
       this.segments = nextSegments;
       return Object.freeze({ selector, ip: this.ip, cpl: this.segments.cpl, task: this.systemTables.snapshot().task });
@@ -781,6 +781,18 @@ export class X86Cpu {
 
   #returnFromInterrupt(start) {
     if (this.mode === 64) return this.#returnFromLongModeInterrupt(start);
+    if (this.mode === 32 && (this.flags & (1n << 14n)) !== 0n) {
+      try {
+        const current = this.systemTables.task;
+        if (!current.usable || !current.present || !current.busy || current.limit < 0x67) {
+          throw new Error("Nested-task IRET requires a present busy current TSS");
+        }
+        const currentTss = new X86Tss32(this.memory, { base: current.base, limit: current.limit });
+        const backlink = currentTss.backlink;
+        if (backlink === 0) throw new Error("Nested-task IRET requires a non-null TSS backlink");
+        return this.switchTask(backlink, { reason: "iret-task", returnIp: this.ip });
+      } catch (error) { throw new CpuFault(error.message, start); }
+    }
     if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("IRET requires 32-bit protected mode", start);
     try {
       const stack = this.segments.registers.ss.cache;
