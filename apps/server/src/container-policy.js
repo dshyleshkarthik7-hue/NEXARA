@@ -7,7 +7,7 @@ export function buildSandboxArgs({ image, runtime = "runsc", memory = "512m", cp
   if (typeof image !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,254}$/.test(image)) {
     throw new TypeError("NEXARA_SANDBOX_IMAGE must be a trusted, pre-pulled image reference");
   }
-  if (!["runsc", "kata", "io.containerd.kata.v2", "runc"].includes(runtime)) throw new TypeError("Sandbox runtime must be an explicitly supported runtime");
+  if (!["runsc", "kata", "io.containerd.kata.v2"].includes(runtime)) throw new TypeError("Sandbox runtime must be runsc or Kata; runc is not supported for guest sessions");
   if (typeof memory !== "string" || !/^(?:[1-9]\d{0,3})(?:m|g)$/.test(memory)) throw new TypeError("Invalid sandbox memory limit");
   if (typeof cpus !== "string" || !/^(?:[1-9]\d*(?:\.\d{1,2})?|0\.\d{1,2})$/.test(cpus) || Number(cpus) <= 0 || Number(cpus) > 4) throw new TypeError("Invalid sandbox CPU limit");
   if (!Number.isSafeInteger(pids) || pids < 8 || pids > 512) throw new TypeError("Invalid sandbox PID limit");
