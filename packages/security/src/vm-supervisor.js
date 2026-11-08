@@ -65,8 +65,9 @@ export class VmSupervisor {
     const id = randomUUID();
     const record = { id, quotas: lease.quotas, state: "starting", leaseId: lease.id, subject: lease.subject, imageDigest: lease.imageDigest, envelope, handle: null, rootfsDevice: null };
     this.#instances.set(id, record);
+    let rootfsDevice;
     try {
-      const rootfsDevice = this.#rootDiskFactory
+      rootfsDevice = this.#rootDiskFactory
         ? await this.#rootDiskFactory({ id, lease, quotas: lease.quotas, imageDigest: lease.imageDigest })
         : undefined;
       record.rootfsDevice = rootfsDevice ?? null;
