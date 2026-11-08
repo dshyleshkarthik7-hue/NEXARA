@@ -252,6 +252,9 @@ test("32-bit IDT task gate switches tasks and records backlink", () => {
   cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
   cpu.systemTables.loadIdtr(idtBase, 0x7ff); cpu.idt.setRegister(idtBase, 0x7ff);
   cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  cpu.segments.installCodeSegment(0x08);
+  cpu.segments.loadStack(0x10);
+  cpu.segments.loadData("ds", 0x10);
   const target = new X86Tss32(memory, { base: 0x600, limit: 0x67 });
   target.setTaskState({ eip: 0x750, eflags: 0x202,
     registers: { eax: 1, ecx: 2, edx: 3, ebx: 4, esp: 0x1f00, ebp: 6, esi: 7, edi: 8 },
@@ -267,4 +270,11 @@ test("32-bit IDT task gate switches tasks and records backlink", () => {
   assert.equal((cpu.flags & (1n << 14n)) !== 0n, true);
   assert.equal(memory.read(gdtBase + 5 * 8 + 5, 1)[0] & 0x0f, 0x0b);
   assert.equal(memory.read(gdtBase + 6 * 8 + 5, 1)[0] & 0x0f, 0x0b);
+  memory.write(0x750, Uint8Array.of(0xcf));
+  cpu.step();
+  assert.equal(cpu.ip, 0x704);
+  assert.equal(cpu.systemTables.task.selector, 0x28);
+  assert.equal((cpu.flags & (1n << 14n)) !== 0n, false);
+  assert.equal(memory.read(gdtBase + 5 * 8 + 5, 1)[0] & 0x0f, 0x0b);
+  assert.equal(memory.read(gdtBase + 6 * 8 + 5, 1)[0] & 0x0f, 0x09);
 });
