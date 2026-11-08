@@ -93,7 +93,7 @@ The evidence collector is a verifier, not a guest orchestrator. It cannot create
 After the native bundle workflow succeeds, `.github/workflows/host-validation.yml` downloads that exact run's artifact and invokes `scripts/run-firecracker-two-boot.sh` on the dedicated KVM runner. The runner stages the kernel, initramfs and same writable ext4 disk into two separate jailer chroots, starts Firecracker through the upstream jailer, configures the guest through the Unix API socket, verifies the live process (non-root UID, seccomp filter, NoNewPrivs, PID/network namespaces and cgroup limits), then snapshots the disk and repeats the boot. The guest emits a write marker on boot one and must find it on boot two.
 
 Before registering the runner, an administrator must provision a delegated cgroup-v2 parent and set repository Actions variables:
-- `NEXARA_JAILER_PARENT_CGROUP`: relative path under `/sys/fs/cgroup`, containing `nexara`, with cpu, memory and pids controllers delegated and enabled
+- `NEXARA_JAILER_PARENT_CGROUP`: relative path under `/sys/fs/cgroup`, containing `nexara`, with cpu, memory and pids controllers available in `cgroup.controllers` and enabled in `cgroup.subtree_control`
 - `NEXARA_JAILER_UID` and `NEXARA_JAILER_GID`: non-root numeric IDs (defaults 12345)
 
 The runner must have labels `self-hosted, linux, x64, kvm, nexara-host-validation`, root/sudo access, KVM, cgroup v2, iproute2, nftables, curl, and a writable `/srv/jailer`. The build artifact is produced by the preceding trusted main-branch workflow; the KVM workflow only runs after that workflow succeeds. A queued job means no matching dedicated runner is online; it is not a test pass.
