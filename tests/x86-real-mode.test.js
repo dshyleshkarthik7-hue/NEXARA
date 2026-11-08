@@ -306,6 +306,65 @@ test("real-mode immediate arithmetic preserves operands for CMP and reports borr
   assert.equal(cpu.flags & 0x80, 0x80);
 });
 
+
+test("real-mode accumulator immediate ADD and SUB update byte and word registers", () => {
+  const { cpu } = cpuFor([0xb0,0xff,0x04,0x01,0x2c,0x02,0x05,0x01,0x00,0xf4]);
+  assert.equal(cpu.run({ maxInstructions: 8 }).state, "halted");
+  assert.equal(cpu.ax, 0x0100);
+  assert.equal(cpu.flags & 1, 0);
+});
+
+test("REPE CMPSB stops at the first unequal byte and preserves remaining CX", () => {
+  const { memory, cpu } = cpuFor([
+    0xbe,0x00,0x06, 0xbf,0x00,0x07, 0xb9,0x04,0x00,
+    0xf3,0xa6,0xf4
+  ]);
+  memory.write(0x600, Uint8Array.of(1,2,3,4));
+  memory.write(0x700, Uint8Array.of(1,9,3,4));
+  assert.equal(cpu.run({ maxInstructions: 8 }).state, "halted");
+  assert.equal(cpu.si, 0x602);
+  assert.equal(cpu.di, 0x702);
+  assert.equal(cpu.cx, 2);
+  assert.equal(cpu.flags & 0x40, 0);
+});
+
+test("REPNE SCASB stops when AL matches the destination byte", () => {
+  const { memory, cpu } = cpuFor([
+    0xb0,0x22, 0xbf,0x00,0x07, 0xb9,0x03,0x00,
+    0xf2,0xae,0xf4
+  ]);
+  memory.write(0x700, Uint8Array.of(0x11,0x22,0x33));
+  assert.equal(cpu.run({ maxInstructions: 8 }).state, "halted");
+  assert.equal(cpu.di, 0x702);
+  assert.equal(cpu.cx, 1);
+  assert.equal(cpu.flags & 0x40, 0x40);
+});
+
+test("segment-register MOV and far CALL/RETF transfer control correctly", () => {
+  const { cpu } = cpuFor([
+    0xb8,0x34,0x12, 0x8e,0xd8, 0x8c,0xd8,
+    0x9a,0x10,0x7c,0x00,0x00, 0xf4,
+    ...new Array(5).fill(0x90),
+    0xbb,0x78,0x56,0xcb
+  ]);
+  assert.equal(cpu.run({ maxInstructions: 12 }).state, "halted");
+  assert.equal(cpu.ds, 0x1234);
+  assert.equal(cpu.ax, 0x1234);
+  assert.equal(cpu.bx, 0x5678);
+});
+
+test("real-mode shifts set carry, overflow and sign flags with arithmetic sign extension", () => {
+  const { cpu } = cpuFor([
+    0xb0,0x81, 0xd0,0xe0, // SHL AL,1 => 02, CF=1, OF=1
+    0xb0,0x80, 0xd0,0xf8, // SAR AL,1 => C0
+    0xf4
+  ]);
+  assert.equal(cpu.run({ maxInstructions: 8 }).state, "halted");
+  assert.equal(cpu.ax & 0xff, 0xc0);
+  assert.equal(cpu.flags & 0x80, 0x80);
+  assert.equal(cpu.flags & 1, 0);
+});
+
 test("unsupported immediate arithmetic group operations fault explicitly", () => {
   const { cpu } = cpuFor([0x80,0xc8,0x01]); // OR AL,1 (/1)
   assert.throws(() => cpu.step(), /Unsupported immediate arithmetic group operation \/1/);
