@@ -9,9 +9,11 @@ const U64_MASK = 0xffffffffffffffffn;
  * and IRET integration are deliberately not implied by this class.
  */
 export class X86Tss32 {
-  constructor(memory, { base = 0n, limit = 0x67 } = {}) {
+  constructor(memory, { base = 0n, limit = 0x67, paging = null } = {}) {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
     this.memory = memory;
+    if (paging !== null && (!paging || paging.memory !== memory || typeof paging.translate !== "function")) throw new TypeError("paging must be a paging engine attached to this guest memory");
+    this.paging = paging;
     this.setRegion(base, limit);
     if (limit < 0x67) throw new RangeError("32-bit TSS limit must include the fixed 104-byte header");
   }
@@ -23,9 +25,8 @@ export class X86Tss32 {
     if (!Number.isInteger(limit) || limit < 0x67 || limit > 0xffff) {
       throw new RangeError("TSS limit must cover the 104-byte header and fit 16 bits");
     }
-    if (address + BigInt(limit) >= BigInt(this.memory.byteLength)) {
-      throw new RangeError("TSS region exceeds guest physical memory");
-    }
+    if (address + BigInt(limit) > 0xffffffffn) throw new RangeError("32-bit TSS linear region exceeds the address space");
+    if (!this.paging && address + BigInt(limit) >= BigInt(this.memory.byteLength)) throw new RangeError("TSS region exceeds guest physical memory");
     this.base = address;
     this.limit = limit;
   }
@@ -34,20 +35,52 @@ export class X86Tss32 {
     if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(length) || length < 1
       || offset + length - 1 > this.limit) throw new RangeError("TSS access exceeds descriptor limit");
     const address = this.base + BigInt(offset);
-    if (address + BigInt(length) > BigInt(this.memory.byteLength)) throw new RangeError("TSS access exceeds guest memory");
+    if (!this.paging && address + BigInt(length) > BigInt(this.memory.byteLength)) throw new RangeError("TSS access exceeds guest memory");
     return Number(address);
   }
 
+  #readBytes(offset, length) {
+    const linear = BigInt(this.#offset(offset, length));
+    if (!this.paging) return this.memory.read(Number(linear), length);
+    const output = new Uint8Array(length);
+    let copied = 0;
+    while (copied < length) {
+      const current = linear + BigInt(copied);
+      const physical = this.paging.translate(current, { user: false });
+      const count = Math.min(length - copied, 4096 - Number(current & 0xfffn));
+      output.set(this.memory.read(physical, count), copied);
+      copied += count;
+    }
+    return output;
+  }
+
+  #writeBytes(offset, source) {
+    const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
+    const linear = BigInt(this.#offset(offset, bytes.length));
+    if (!this.paging) { this.memory.write(Number(linear), bytes); return; }
+    const writes = [];
+    let copied = 0;
+    while (copied < bytes.length) {
+      const current = linear + BigInt(copied);
+      const physical = this.paging.translate(current, { write: true, user: false });
+      const count = Math.min(bytes.length - copied, 4096 - Number(current & 0xfffn));
+      if (physical + count > this.memory.byteLength) throw new RangeError("Translated TSS write exceeds guest physical memory");
+      writes.push({ physical, bytes: bytes.slice(copied, copied + count) });
+      copied += count;
+    }
+    for (const write of writes) this.memory.write(write.physical, write.bytes);
+  }
+
   #read16(offset) {
-    const b = this.memory.read(this.#offset(offset, 2), 2);
+    const b = this.#readBytes(offset, 2);
     return b[0] | (b[1] << 8);
   }
   #write16(offset, value) {
     if (!Number.isInteger(value) || value < 0 || value > 0xffff) throw new RangeError("TSS selector must be 16-bit");
-    this.memory.write(this.#offset(offset, 2), Uint8Array.of(value & 0xff, value >>> 8));
+    this.#writeBytes(offset, Uint8Array.of(value & 0xff, value >>> 8));
   }
   #read32(offset) {
-    const b = this.memory.read(this.#offset(offset, 4), 4);
+    const b = this.#readBytes(offset, 4);
     return (b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0;
   }
   #write32(offset, value) {
@@ -55,7 +88,7 @@ export class X86Tss32 {
     try { v = BigInt(value); } catch { throw new TypeError("TSS stack pointer must be an integer"); }
     if (v < 0n || v > U32_MAX) throw new RangeError("TSS stack pointer must be 32-bit");
     const n = Number(v);
-    this.memory.write(this.#offset(offset, 4), Uint8Array.of(n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff));
+    this.#writeBytes(offset, Uint8Array.of(n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff));
   }
 
   getRingStack(ring) {
@@ -123,7 +156,7 @@ export class X86Tss32 {
     for (const [name, offset] of Object.entries(segmentOffsets)) {
       view.setUint16(offset - 32, values16[name], true);
     }
-    this.memory.write(this.#offset(32, image.length), image);
+    this.#writeBytes(32, image);
     return this.getTaskState();
   }
   get ioMapBase() { return this.#read16(102); }
@@ -145,7 +178,7 @@ export class X86Tss32 {
     for (let p = firstBit; p <= lastBit; p++) {
       const byteOffset = mapBase + (p >>> 3);
       if (byteOffset > this.limit) return false;
-      const byte = this.memory.read(this.#offset(byteOffset), 1)[0];
+      const byte = this.#readBytes(byteOffset, 1)[0];
       if ((byte & (1 << (p & 7))) !== 0) return false;
     }
     return true;
