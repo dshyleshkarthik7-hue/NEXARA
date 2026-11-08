@@ -27,7 +27,9 @@ function validateRequest(input, now) {
     throw new TypeError("Lease subject and SHA-256 image digest are required");
   }
   const ttlMs = input.ttlMs ?? 15 * 60 * 1000;
-  if (!Number.isSafeInteger(ttlMs) || ttlMs < 1000 || ttlMs > MAX_TTL_MS) throw new RangeError("Lease TTL is outside policy");
+  if (!Number.isSafeInteger(ttlMs) || ttlMs < 1000 || ttlMs > MAX_TTL_MS || !Number.isSafeInteger(now + ttlMs)) {
+    throw new RangeError("Lease TTL is outside policy");
+  }
   const quotas = input.quotas ?? {};
   const cpuMillis = quotas.cpuMillis ?? 1000;
   const memoryMiB = quotas.memoryMiB ?? 512;
@@ -37,11 +39,23 @@ function validateRequest(input, now) {
     || !Number.isInteger(diskMiB) || diskMiB < 16 || diskMiB > 1048576) {
     throw new RangeError("VM resource quotas exceed policy bounds");
   }
+  if (input.capabilities !== undefined && !Array.isArray(input.capabilities)) throw new TypeError("Capabilities must be an array");
   const capabilities = [...new Set(input.capabilities ?? [])].sort();
-  if (capabilities.some(value => !CAPABILITIES.has(value))) throw new TypeError("Unknown VM capability");
+  if (capabilities.some(value => typeof value !== "string" || !CAPABILITIES.has(value))) throw new TypeError("Unknown VM capability");
+  if (input.egress !== undefined && !Array.isArray(input.egress)) throw new TypeError("Egress policy must be an array");
   const egress = [...new Set(input.egress ?? [])].sort();
-  if (egress.some(value => typeof value !== "string" || value.length > 253 || value === "*" || !/^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::\d{1,5})?$/.test(value))) {
-    throw new TypeError("Egress entries must be explicit hostnames or host:port values");
+  if (egress.some(value => {
+    if (typeof value !== "string" || value.length > 253 || value === "*") return true;
+    const parts = value.split(":");
+    if (parts.length > 2) return true;
+    const hostname = parts[0];
+    const labels = hostname.split(".");
+    if (!hostname || labels.some(label => label.length < 1 || label.length > 63
+      || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))) return true;
+    if (parts.length === 2 && (!/^\d{1,5}$/.test(parts[1]) || Number(parts[1]) < 1 || Number(parts[1]) > 65535)) return true;
+    return false;
+  })) {
+    throw new TypeError("Egress entries must be explicit hostnames or host:port values with valid ports");
   }
   return {
     format: FORMAT,
@@ -74,7 +88,8 @@ export class VmLeaseAuthority {
 
   verify(envelope, { now = Date.now(), subject, imageDigest } = {}) {
     if (!envelope || !envelope.payload || envelope.payload.format !== FORMAT
-      || typeof envelope.signature !== "string" || !Number.isSafeInteger(now)) {
+      || typeof envelope.signature !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(envelope.signature)
+      || !Number.isSafeInteger(now) || now < 0) {
       throw new TypeError("Malformed VM lease");
     }
     const body = JSON.stringify(canonical(envelope.payload));
