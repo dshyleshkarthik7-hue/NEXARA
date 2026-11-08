@@ -116,3 +116,38 @@ test("legacy boot sector loads and transfers control to a second stage through I
   assert.equal(cpu.ip, 0x7e04);
   assert.deepEqual(memory.read(0x7e00, 4), Uint8Array.of(0xb8,0xef,0xbe,0xf4));
 });
+
+test("INT 13h EDD check and AH=42 extended LBA read use the disk-address packet", () => {
+  const disk = new MemoryBlockDevice({ sectors: 32 });
+  const sector = new Uint8Array(512).fill(0x6d);
+  disk.writeSectors(5, sector);
+  const { memory, cpu } = makeBiosCpu({ disk });
+
+  cpu.ax = 0x4100;
+  cpu.bx = 0x55aa;
+  cpu.dx = 0x0080;
+  cpu.step();
+  assert.equal(cpu.ax, 0x3000);
+  assert.equal(cpu.bx, 0xaa55);
+  assert.equal(cpu.cx & 1, 1);
+  assert.equal(cpu.flags & 1, 0);
+
+  const dap = new Uint8Array(16);
+  dap[0] = 0x10;
+  dap[2] = 1;
+  dap[4] = 0x00;
+  dap[5] = 0x06; // offset 0600h
+  dap[6] = 0;
+  dap[7] = 0;
+  dap[8] = 5; // 64-bit LBA 5
+  memory.write(0x0500, dap);
+  cpu.ip = 0x7c00;
+  cpu.ax = 0x4200;
+  cpu.dx = 0x0080;
+  cpu.ds = 0;
+  cpu.si = 0x0500;
+  cpu.step();
+  assert.equal(cpu.ax, 1);
+  assert.equal(cpu.flags & 1, 0);
+  assert.deepEqual(memory.read(0x600, 512), sector);
+});
