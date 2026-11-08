@@ -86,3 +86,16 @@ sudo NEXARA_EVIDENCE_DIR=/var/lib/nexara/evidence/run-001 \
 The collector runs the live-process jail verifier and two-boot guest-log verifier, copies serial logs into a private evidence directory, hashes them, and records kernel, cgroup, seccomp and NoNewPrivs observations. It fails closed if the process is not in seccomp filter mode, NoNewPrivs is absent, the firewall counter did not increase, or the guest logs lack the required boot/disk/egress markers.
 
 The evidence collector is a verifier, not a guest orchestrator. It cannot create proof by itself: the serial markers must be emitted by the known test guest after its actual disk sync, reboot and egress test. Keep the guest image digest, Firecracker/jailer binary digests, runner identity, and full workflow logs alongside the bundle. Never treat a mocked provider test or the namespace-only preflight as proof of guest isolation.
+
+
+## Automated two-boot KVM runner
+
+After the native bundle workflow succeeds, `.github/workflows/host-validation.yml` downloads that exact run's artifact and invokes `scripts/run-firecracker-two-boot.sh` on the dedicated KVM runner. The runner stages the kernel, initramfs and same writable ext4 disk into two separate jailer chroots, starts Firecracker through the upstream jailer, configures the guest through the Unix API socket, verifies the live process (non-root UID, seccomp filter, NoNewPrivs, PID/network namespaces and cgroup limits), then snapshots the disk and repeats the boot. The guest emits a write marker on boot one and must find it on boot two.
+
+Before registering the runner, an administrator must provision a delegated cgroup-v2 parent and set repository Actions variables:
+- `NEXARA_JAILER_PARENT_CGROUP`: relative path under `/sys/fs/cgroup`, containing `nexara`, with cpu, memory and pids controllers delegated and enabled
+- `NEXARA_JAILER_UID` and `NEXARA_JAILER_GID`: non-root numeric IDs (defaults 12345)
+
+The runner must have labels `self-hosted, linux, x64, kvm, nexara-host-validation`, root/sudo access, KVM, cgroup v2, iproute2, nftables, curl, and a writable `/srv/jailer`. The build artifact is produced by the preceding trusted main-branch workflow; the KVM workflow only runs after that workflow succeeds. A queued job means no matching dedicated runner is online; it is not a test pass.
+
+The two-boot harness currently validates the disk and jailer process boundary. It does not configure a guest NIC or claim guest-originated egress isolation. The host namespace firewall preflight is a separate check. The collector's optional nftables counter arguments must only be used with counters measured around a real network probe, never synthetic values.
