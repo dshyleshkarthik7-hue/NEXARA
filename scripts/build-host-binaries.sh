@@ -19,7 +19,8 @@ git -C "$FC_SRC" submodule update --init --recursive
 # Build the upstream project binaries; do not patch or replace the jailer.
 (
   cd "$FC_SRC"
-  cargo build --release --locked --bin firecracker --bin jailer
+  cargo build --release --locked --bin firecracker
+  cargo build --release --locked -p jailer --bin jailer
 )
 install -m 0755 "$FC_SRC/target/release/firecracker" "$OUT/firecracker"
 install -m 0755 "$FC_SRC/target/release/jailer" "$OUT/jailer"
