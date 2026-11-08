@@ -85,3 +85,23 @@ test("durable journal replay resolves the COW overlay from persistent VM registr
   await recovered.close();
   assert.equal((await replay.list()).length, 0);
 });
+
+
+test("persistent registry allocates stable workload UUIDs and rejects tenant rebinding", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexara-vm-identity-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const registry = new PersistentVmStorageRegistry({
+    directory: path.join(root, "registry"), overlayDirectory: path.join(root, "overlays"),
+    resolveBaseDevice: async () => baseDevice()
+  });
+  const identity = { workloadKey: "tenant-workspace-17", subject: "tenant-1", imageDigest: baseDigest };
+  const first = await registry.getOrCreateIdentity(identity);
+  const second = await registry.getOrCreateIdentity(identity);
+  assert.equal(first, second);
+  await assert.rejects(() => registry.getOrCreateIdentity({
+    ...identity, subject: "tenant-2"
+  }), /already bound/);
+  await assert.rejects(() => registry.getOrCreateIdentity({
+    ...identity, imageDigest: "sha256:" + "f".repeat(64)
+  }), /already bound/);
+});
