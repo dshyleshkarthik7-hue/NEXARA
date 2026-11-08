@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, chmod } from "node:fs/promises";
+import { mkdtemp, rm, chmod, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -120,4 +120,29 @@ test("copy-on-write disk rejects overlay files with permissive modes", async t =
     directory, vmId, sectors: 2, baseDigest: digestOf(baseBytes), baseDevice: readOnly, create: false
   }), /private regular file/);
   await readOnly.close();
+});
+
+
+test("copy-on-write disk materializes a hypervisor-compatible raw image without mutating its overlay", async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "nexara-cow-raw-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const baseBytes = new Uint8Array(8 * 512).fill(0x21);
+  const base = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 8 });
+  await base.writeSectors(0, baseBytes);
+  await base.close();
+  const immutableBase = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 8, readOnly: true, create: false });
+  const overlay = await CopyOnWriteBlockDevice.open({ directory, vmId: "12345678-1234-4234-8234-123456789abc", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase });
+  await overlay.writeSectors(3, new Uint8Array(512).fill(0x7c));
+  const target = path.join(directory, "guest.raw");
+  const result = await overlay.materializeRaw(target);
+  const bytes = await readFile(target);
+  assert.equal(result.format, "raw");
+  assert.equal(result.byteLength, 4096);
+  assert.equal(bytes.length, 4096);
+  assert.equal(bytes[0], 0x21);
+  assert.equal(bytes[3 * 512], 0x7c);
+  assert.equal(bytes[4 * 512], 0x21);
+  await assert.rejects(() => overlay.materializeRaw(target), { code: "EEXIST" });
+  await overlay.close();
+  await immutableBase.close();
 });
