@@ -41,7 +41,7 @@ fi
 set +o pipefail
 yes '' | make -C "$BB_SRC" oldconfig
 set -o pipefail
-make -C "$BB_SRC" CC=musl-gcc -j"$(nproc)"
+make -C "$BB_SRC" CC=gcc LDFLAGS=-static -j"$(nproc)"
 install -m 0755 "$BB_SRC/busybox" "$OUT/busybox"
 if readelf -l "$OUT/busybox" | grep -q INTERP; then fail "BusyBox unexpectedly has a dynamic interpreter"; fi
 "$OUT/firecracker" --version
