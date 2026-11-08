@@ -116,8 +116,24 @@ export class DurableRecoveryJournal {
       try {
         lock = await open(lockPath, "wx", 0o600);
       } catch (error) {
-        if (error.code === "EEXIST") throw new Error("Durable recovery is already running for this journal");
-        throw error;
+        if (error.code !== "EEXIST") throw error;
+        // Reclaim only a lock whose recorded process is definitely gone.
+        // Unknown or permission-denied owners fail closed for operator review.
+        let owner;
+        try { owner = JSON.parse(await readFile(lockPath, "utf8")); } catch {
+          throw new Error("Durable recovery lock is unreadable; manual inspection required");
+        }
+        if (!Number.isSafeInteger(owner.pid) || owner.pid < 1) {
+          throw new Error("Durable recovery lock has no valid owner; manual inspection required");
+        }
+        try {
+          process.kill(owner.pid, 0);
+          throw new Error("Durable recovery is already running for this journal");
+        } catch (probeError) {
+          if (probeError.code !== "ESRCH") throw probeError;
+        }
+        await unlink(lockPath);
+        lock = await open(lockPath, "wx", 0o600);
       }
       try {
         await lock.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }) + "\\n");
