@@ -70,3 +70,19 @@ The production bootstrap wires `PersistentVmRegistry.getOrCreateIdentity()` into
 The server's `POST /api/vms` route now requires `workloadKey` in the policy returned by the trusted `authorizeVmRequest` adapter and passes it to the supervisor. Existing adapters must be updated to return this key from their authenticated workload mapping. The host calls `supervisor.initialize()` and replays the durable journal before `createMicroVmHost()` resolves; only then should the server listen.
 
 The identity is intentionally not a substitute for a distributed scheduler lock: run one active host owner per VM identity, or add a shared lease/consensus service before multi-host placement.
+
+
+### Evidence collection after a real guest run
+
+After the test harness has booted the same VM twice, written and synced a disk marker on boot one, verified it on boot two, and recorded the host nftables drop counter before/after the guest egress probe, collect evidence while the Firecracker process is still alive:
+
+```sh
+sudo NEXARA_EVIDENCE_DIR=/var/lib/nexara/evidence/run-001 \
+  bash scripts/collect-host-validation-evidence.sh \
+  FIRECRACKER_PID first-boot.serial.log second-boot.serial.log \
+  NFT_DROP_COUNTER_BEFORE NFT_DROP_COUNTER_AFTER
+```
+
+The collector runs the live-process jail verifier and two-boot guest-log verifier, copies serial logs into a private evidence directory, hashes them, and records kernel, cgroup, seccomp and NoNewPrivs observations. It fails closed if the process is not in seccomp filter mode, NoNewPrivs is absent, the firewall counter did not increase, or the guest logs lack the required boot/disk/egress markers.
+
+The evidence collector is a verifier, not a guest orchestrator. It cannot create proof by itself: the serial markers must be emitted by the known test guest after its actual disk sync, reboot and egress test. Keep the guest image digest, Firecracker/jailer binary digests, runner identity, and full workflow logs alongside the bundle. Never treat a mocked provider test or the namespace-only preflight as proof of guest isolation.
