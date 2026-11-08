@@ -1469,3 +1469,4 @@ export class X86Cpu {
     return Object.fromEntries(REG_NAMES.slice(0, this.mode === 64 ? 16 : 8).map((name, i) => [name, this.registers[i].toString()]));
   }
 }
+export { X86RealModeCpu } from "./real-mode.js";
