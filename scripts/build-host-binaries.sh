@@ -38,6 +38,33 @@ elif grep -q '^CONFIG_STATIC=' "$BB_SRC/.config"; then
 else
   printf '\nCONFIG_STATIC=y\n' >> "$BB_SRC/.config"
 fi
+# Console keyboard mode is not used by the guest initramfs.
+if grep -q '^CONFIG_KBD_MODE=yset +o pipefail
+yes '' | make -C "$BB_SRC" oldconfig
+set -o pipefail
+make -C "$BB_SRC" CC=gcc LDFLAGS=-static -j"$(nproc)"
+install -m 0755 "$BB_SRC/busybox" "$OUT/busybox"
+if readelf -l "$OUT/busybox" | grep -q INTERP; then fail "BusyBox unexpectedly has a dynamic interpreter"; fi
+"$OUT/firecracker" --version
+"$OUT/jailer" --version
+file "$OUT/firecracker" "$OUT/jailer" "$OUT/busybox" 2>/dev/null || true
+(
+  cd "$OUT"
+  sha256sum firecracker jailer busybox > SHA256SUMS
+  {
+    echo "firecracker_tag=$FC_TAG"
+    echo "firecracker_commit=$(git -C "$FC_SRC" rev-parse HEAD)"
+    echo "busybox_tag=$BB_TAG"
+    echo "busybox_commit=$(git -C "$BB_SRC" rev-parse HEAD)"
+    rustc --version
+    cargo --version
+    gcc --version | head -n1
+  } > BUILD-INFO.txt
+)
+echo "Built binaries and manifests in $OUT"
+ "$BB_SRC/.config"; then
+  sed -i 's/^CONFIG_KBD_MODE=y$/# CONFIG_KBD_MODE is not set/' "$BB_SRC/.config"
+fi
 set +o pipefail
 yes '' | make -C "$BB_SRC" oldconfig
 set -o pipefail
