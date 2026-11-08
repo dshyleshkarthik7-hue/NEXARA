@@ -72,6 +72,7 @@ function validateRequest(input, now) {
 
 export class VmLeaseAuthority {
   #key;
+  #revoked = new Set();
   constructor(secret) {
     const key = Buffer.isBuffer(secret) ? Buffer.from(secret) : Buffer.from(String(secret ?? ""), "utf8");
     if (key.byteLength < 32) throw new RangeError("VM lease signing secret must contain at least 32 bytes");
@@ -85,6 +86,14 @@ export class VmLeaseAuthority {
     const signature = createHmac("sha256", this.#key).update(body).digest("base64url");
     return freezeDeep({ payload, signature });
   }
+
+  revoke(leaseId) {
+    if (typeof leaseId !== "string" || !/^[0-9a-f-]{36}$/i.test(leaseId)) throw new TypeError("Invalid lease ID");
+    this.#revoked.add(leaseId);
+    return true;
+  }
+
+  isRevoked(leaseId) { return this.#revoked.has(leaseId); }
 
   verify(envelope, { now = Date.now(), subject, imageDigest } = {}) {
     if (!envelope || !envelope.payload || envelope.payload.format !== FORMAT
@@ -100,6 +109,7 @@ export class VmLeaseAuthority {
       throw new Error("Invalid VM lease signature");
     }
     const lease = envelope.payload;
+    if (this.#revoked.has(lease.id)) throw new Error("VM lease has been revoked");
     if (lease.expiresAt <= now || lease.issuedAt > now + 30_000 || lease.expiresAt - lease.issuedAt > MAX_TTL_MS) {
       throw new Error("VM lease is expired or outside its validity window");
     }
