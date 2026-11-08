@@ -111,7 +111,7 @@ export class X86RealModeCpu {
     }
     const bases = [
       [this.bx, this.si], [this.bx, this.di], [this.bp, this.si], [this.bp, this.di],
-      [this.si], [this.di], null, [this.bx]
+      [this.si], [this.di], [this.bp], [this.bx]
     ];
     let displacement = 0;
     if (mod === 0 && rm === 6) displacement = this.#fetch16();
