@@ -32,7 +32,7 @@ async function fixture(t) {
     });
   });
   await new Promise((resolve, reject) => server.listen(socketPath, error => error ? reject(error) : resolve()));
-  const host = { socketPath, jailRoot, token: "host-token" };
+  const host = { socketPath, jailRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000, token: "host-token" };
   let stopped = 0;
   const provider = {
     start: async options => { assert.equal(options.requireJailer, true); assert.equal(options.requireCgroups, true); return host; },
@@ -101,7 +101,7 @@ test("Firecracker driver tears down jailed worker when API configuration fails",
       await new Promise(resolve => server.close(resolve));
       await new Promise(resolve => f.provider._close?.(resolve) ?? resolve());
     };
-    return { socketPath: f.socketPath + ".bad", jailRoot: f.jailRoot, stop: async () => {} };
+    return { socketPath: f.socketPath + ".bad", jailRoot: f.jailRoot, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000, stop: async () => {} };
   };
   const driver = new FirecrackerDriver({ provider: f.provider, resolveImage: f.resolveImage });
   await assert.rejects(() => driver.launch(config), /API request failed/);
