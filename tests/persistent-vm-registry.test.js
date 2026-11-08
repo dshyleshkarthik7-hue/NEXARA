@@ -55,3 +55,34 @@ test("persistent VM registry refuses untrusted or mismatched base devices", asyn
   }), /immutable base device/);
   await registry.close();
 });
+
+
+test("persistent VM registry restores stable workload UUID and prevents tenant/image rebinding", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexara-stable-workload-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const bytes = Buffer.alloc(64 * 512, 0x22);
+  const writable = new MemoryBlockDevice({ sectors: 64 });
+  writable.writeSectors(0, bytes);
+  const baseDigest = digest(bytes);
+  const options = {
+    directory: path.join(root, "registry"),
+    overlayDirectory: path.join(root, "overlays"),
+    resolveBaseDevice: async () => ({
+      sectors: 64, readOnly: true,
+      readSectors: (lba, count) => writable.readSectors(lba, count)
+    })
+  };
+  const workload = { workloadKey: "control-plane-job-88", subject: "tenant-a", imageDigest: baseDigest };
+  const first = new PersistentVmRegistry(options);
+  const id = await first.getOrCreateIdentity(workload);
+  await first.create({ vmId: id, sectors: 64, baseDigest });
+  await first.close();
+
+  const restarted = new PersistentVmRegistry(options);
+  assert.equal(await restarted.getOrCreateIdentity(workload), id);
+  const reopened = await restarted.openOrCreate({ vmId: id, sectors: 64, baseDigest });
+  assert.equal(Buffer.from(await reopened.readSectors(0))[0], 0x22);
+  await assert.rejects(() => restarted.getOrCreateIdentity({ ...workload, subject: "tenant-b" }), /already bound/);
+  await assert.rejects(() => restarted.getOrCreateIdentity({ ...workload, imageDigest: digest(Buffer.alloc(64 * 512, 0x33)) }), /already bound/);
+  await restarted.close();
+});
