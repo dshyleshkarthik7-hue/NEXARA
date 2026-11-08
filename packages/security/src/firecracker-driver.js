@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, mkdir, copyFile, chmod, chown } from "node:fs/promises";
+import { lstat, mkdir, copyFile, chmod, chown, unlink } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
@@ -83,7 +83,21 @@ export class FirecrackerDriver {
       const kernelTarget = path.join(artifactDir, "vmlinux");
       const rootfsTarget = path.join(artifactDir, "rootfs.ext4");
       await copyFile(manifest.kernelPath, kernelTarget);
-      await copyFile(manifest.rootfsPath, rootfsTarget);
+      if (config.rootfsDevice !== undefined) {
+        const disk = config.rootfsDevice;
+        if (!disk || typeof disk.materializeRaw !== "function" || !Number.isSafeInteger(disk.sectors)
+          || disk.sectors < 1 || disk.sectors * 512 > config.quotas.diskMiB * 1024 * 1024) {
+          throw new TypeError("Invalid broker-managed root disk or disk quota");
+        }
+        const materialized = await disk.materializeRaw(rootfsTarget);
+        if (!materialized || materialized.path !== rootfsTarget || materialized.format !== "raw"
+          || materialized.byteLength !== disk.sectors * 512) {
+          throw new Error("Copy-on-write root disk did not produce a valid raw image");
+        }
+        handle.materializedRootfs = rootfsTarget;
+      } else {
+        await copyFile(manifest.rootfsPath, rootfsTarget);
+      }
       await chmod(kernelTarget, 0o444);
       await chmod(rootfsTarget, manifest.readOnlyRootfs === true ? 0o444 : 0o660);
       await chown(rootfsTarget, host.uid, host.gid);
@@ -132,6 +146,7 @@ export class FirecrackerDriver {
       }
     } finally {
       await this.#provider.stop(handle.host);
+      if (handle.materializedRootfs) await unlink(handle.materializedRootfs).catch(() => {});
       handle.started = false;
     }
   }
