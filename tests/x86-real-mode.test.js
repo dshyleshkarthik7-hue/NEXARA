@@ -379,10 +379,12 @@ test("real-mode shifts set carry, overflow and sign flags with arithmetic sign e
 
 test("real-mode RCL and RCR rotate through carry and preserve zero-count flags", () => {
   const { cpu } = cpuFor([
-    0xb0,0x80, 0xf9,       // MOV AL,80h; STC
+    0xb0,0xff, 0x04,0x01,  // ADD AL,1 sets CF
+    0xb0,0x80,             // MOV AL,80h preserves CF
     0xd0,0xd0,             // RCL AL,1 => 01, CF=1
     0xd0,0xd8,             // RCR AL,1 => 80, CF=1
-    0xf8,                  // CLC
+    0xb0,0x00, 0x04,0x01,  // ADD 0+1 clears CF
+    0xb0,0x80,             // MOV AL,80h
     0xb9,0x08,0x00,        // MOV CX,8
     0xd2,0xc0,             // ROL AL,CL (8-bit rotation count 8 => no-op)
     0xf4
