@@ -66,10 +66,10 @@ export class LinuxJailerProvider {
     }
     if (namespace.isSymbolicLink()) throw new Error("Network namespace handle must not be a symlink");
 
-    const socketPath = path.join(
-      this.#chrootBaseDir, path.basename(this.#firecrackerPath),
-      config.id, "root", "run", "firecracker.socket"
+    const jailRoot = path.join(
+      this.#chrootBaseDir, path.basename(this.#firecrackerPath), config.id, "root"
     );
+    const socketPath = path.join(jailRoot, "firecracker.socket");
     if (socketPath.length >= 104) throw new Error("Firecracker Unix socket path exceeds Linux sun_path limit");
 
     const cpuQuota = Math.max(1000, config.quotas.cpuMillis * 100);
@@ -88,7 +88,7 @@ export class LinuxJailerProvider {
       "--netns", this.#netnsPath,
       "--new-pid-ns",
       "--",
-      "--api-sock", "/run/firecracker.socket"
+      "--api-sock", "/firecracker.socket"
     ];
     const child = this.#spawn(this.#jailerPath, args, {
       cwd: this.#chrootBaseDir,
@@ -110,6 +110,7 @@ export class LinuxJailerProvider {
     let stopped = false;
     return Object.freeze({
       socketPath,
+      jailRoot,
       child,
       stop: async () => {
         if (stopped) return;
