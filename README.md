@@ -74,9 +74,21 @@ The browser is not a host security boundary. The PTY backend runs host processes
 
 Before untrusted multi-tenant use, NEXARA still needs host-enforced virtual networking and firewall rules, broker integration into the actual VM device path, copy-on-write image overlays and robust image intake, firmware and a bootable guest pipeline, a concrete host network/TAP provisioning service, production Linux/KVM validation, adversarial escape tests, fuzzing, and independent security review. The current supervisor is a lifecycle coordinator requiring an externally supplied microVM driver; the egress adapter pins DNS answers but does not itself install host firewall rules. See [SECURITY-ARCHITECTURE.md](SECURITY-ARCHITECTURE.md).
 
-## Current completion estimate
+## Release gates and completion status
 
-For the broader goal of a **bootable, Linux-capable, securely isolated x86 virtual machine**, the repository is approximately **41% complete**. This is an engineering estimate, not a measured test metric: the workspace, early interpreter, paging-aware 32-bit ring transition, explicit error-code exception frames, opt-in page-fault/double-fault delivery, and 64-bit TSS/LTR/IST interrupt delivery exist, but firmware/boot, broad x86 compatibility, complete hardware task switching, production host network/TAP provisioning, broker integration into the actual VM device path, firmware/boot pipeline, virtual device integration, Linux guest support, production Linux/KVM validation, and adversarial security validation are still major unfinished work.
+NEXARA has no single defensible completion percentage: the repository contains several distinct products (browser workspace, experimental x86 interpreter, and a Firecracker-backed microVM host), and passing one subsystem's tests does not establish completion of the others.
+
+The application regression workflow and shell-level validation fixtures are automated. The native host-bundle pipeline is still being brought to a reproducible green build; its previous CI failure was in the BusyBox build configuration and is being corrected. The real-KVM workflow is intentionally gated on a successful bundle build and a separately managed self-hosted Linux runner. A skipped KVM workflow is **not** a successful hardware test.
+
+Before claiming a production-ready Linux-capable microVM, the remaining release gates are:
+- A clean CI build of Firecracker, jailer, static BusyBox, kernel, initramfs and persistent ext4 test disk, followed by bundle checksum/format verification.
+- A real KVM two-boot run proving the same ext4 disk persists data across Firecracker restarts.
+- Live verification of jailer-applied seccomp, NoNewPrivs, non-root identity, namespaces and cgroup limits on the dedicated runner.
+- A separately measured host firewall/TAP policy test; no guest egress-blocking claim is made by the current guest image.
+- Adversarial lifecycle, image-intake, network-policy and isolation tests, plus independent security review.
+- Firmware/bootloader support, broader x86 and virtual-device compatibility, broker integration into the actual VM device path, and an unmodified Linux guest boot remain separate product milestones and are not delivered by the current smoke test.
+
+The current build and KVM workflows provide repeatable gates, not a certification. Do not deploy this repository as an untrusted multi-tenant VM service until the host-level and security release gates above have passed.
 
 ## Configuration
 
