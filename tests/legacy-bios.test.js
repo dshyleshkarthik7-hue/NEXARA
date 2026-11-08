@@ -151,3 +151,47 @@ test("INT 13h EDD check and AH=42 extended LBA read use the disk-address packet"
   assert.equal(cpu.flags & 1, 0);
   assert.deepEqual(memory.read(0x600, 512), sector);
 });
+
+test("INT 16h keyboard services poll, peek and consume queued key words", () => {
+  const disk = new MemoryBlockDevice({ sectors: 1 });
+  const { cpu, bios } = makeBiosCpu({ disk });
+  cpu.ax = 0x0100;
+  cpu.step();
+  assert.equal(cpu.flags & 0x40, 0x40);
+
+  bios.enqueueKey(0x1e61); // scan code 1Eh, ASCII 'a'
+  cpu.ip = 0x7c00;
+  cpu.ax = 0x0100;
+  cpu.step();
+  assert.equal(cpu.ax, 0x1e61);
+  assert.equal(cpu.flags & 0x40, 0);
+
+  cpu.ip = 0x7c00;
+  cpu.ax = 0x0000;
+  cpu.step();
+  assert.equal(cpu.ax, 0x1e61);
+  cpu.ip = 0x7c00;
+  cpu.ax = 0x0000;
+  cpu.step();
+  assert.equal(cpu.flags & 0x40, 0x40);
+});
+
+test("INT 1Ah returns deterministic BIOS ticks and reports midnight rollover", () => {
+  const disk = new MemoryBlockDevice({ sectors: 1 });
+  const { cpu, bios } = makeBiosCpu({ disk });
+  bios.advanceTicks(0x1800af - 100);
+  cpu.ax = 0x0000;
+  cpu.step();
+  assert.equal((cpu.cx << 16) | cpu.dx, 0x1800af - 100);
+  assert.equal(cpu.ax & 0xff, 0);
+
+  bios.advanceTicks(101);
+  cpu.ip = 0x7c00;
+  cpu.ax = 0;
+  cpu.step();
+  assert.equal((cpu.cx << 16) | cpu.dx, 1);
+  assert.equal(cpu.ax & 0xff, 1);
+  cpu.ip = 0x7c00;
+  cpu.step();
+  assert.equal(cpu.ax & 0xff, 0);
+});
