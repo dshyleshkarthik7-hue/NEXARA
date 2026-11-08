@@ -41,7 +41,7 @@ export async function createMicroVmHost({
       || stat.size > quotas.diskMiB * 1024 * 1024) {
       throw new Error("Trusted root image has invalid geometry or exceeds the VM disk quota");
     }
-    return registry.create({
+    return registry.openOrCreate({
       vmId: id,
       sectors: stat.size / 512,
       baseDigest: manifest.rootfsDigest
@@ -52,6 +52,7 @@ export async function createMicroVmHost({
   const supervisor = new VmSupervisor({
     authority, driver, clock, limits, recoveryJournal: journal,
     resolveRecoveryDevice: registry.resolveDevice,
+    resolveVmIdentity: ({ workloadKey, subject, imageDigest }) => registry.getOrCreateIdentity({ workloadKey, subject, imageDigest }),
     rootDiskFactory,
     releaseRootDisk: vmId => registry.release(vmId)
   });
