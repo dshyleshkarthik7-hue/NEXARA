@@ -35,6 +35,8 @@ jobs:
         env:
           LINUX_KERNEL_VERSION: 6.12.1
         run: bash scripts/build-firecracker-kernel.sh
+      - name: Build persistent ext4 guest test disk
+        run: bash scripts/build-firecracker-test-disk.sh "$GITHUB_WORKSPACE/dist/host-binaries/nexara-test-rootfs.ext4"
       - name: Build minimal guest initramfs
         run: |
           bash scripts/build-firecracker-guest-initramfs.sh \
@@ -42,8 +44,9 @@ jobs:
             "$GITHUB_WORKSPACE/dist/host-binaries/nexara-guest-initramfs.cpio.gz"
           cd dist/host-binaries
           sha256sum nexara-guest-initramfs.cpio.gz >> SHA256SUMS
-          cat KERNEL-SHA256SUMS >> SHA256SUMS\n          sha256sum nexara-test-rootfs.ext4 >> SHA256SUMS
-      - name: Build persistent ext4 guest test disk\n        run: bash scripts/build-firecracker-test-disk.sh "$GITHUB_WORKSPACE/dist/host-binaries/nexara-test-rootfs.ext4"\n      - name: Verify complete runtime bundle
+          cat KERNEL-SHA256SUMS >> SHA256SUMS
+          sha256sum nexara-test-rootfs.ext4 >> SHA256SUMS
+      - name: Verify complete runtime bundle
         run: bash scripts/verify-host-bundle.sh
       - name: Upload complete host and guest bundle
         uses: actions/upload-artifact@v4
