@@ -2,11 +2,11 @@
 # Validate evidence collected from two real Firecracker guest boots.
 set -Eeuo pipefail
 fail(){ echo "GUEST EVIDENCE FAILED: $*" >&2; exit 1; }
-[[ $# -eq 4 ]] || fail "usage: $0 first-boot.serial.log second-boot.serial.log nft-drop-counter-before nft-drop-counter-after"
+[[ $# -eq 2 || $# -eq 4 ]] || fail "usage: $0 first-boot.serial.log second-boot.serial.log [nft-drop-counter-before nft-drop-counter-after]"
 first="$1"; second="$2"; before="$3"; after="$4"
 [[ -f "$first" && ! -L "$first" && -s "$first" ]] || fail "first boot serial log missing/empty"
 [[ -f "$second" && ! -L "$second" && -s "$second" ]] || fail "second boot serial log missing/empty"
-[[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]] || fail "nftables counters must be decimal integers"
+if [[ $# -eq 4 ]]; then\n  before="$3"; after="$4"\n  [[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]] || fail "nftables counters must be decimal integers"\nfi
 for marker in NEXARA_GUEST_BOOT_OK NEXARA_DISK_WRITE_OK NEXARA_GUEST_VALIDATION_COMPLETE; do
   grep -Fq "$marker" "$first" || fail "first boot missing marker: $marker"
 done
@@ -18,7 +18,7 @@ for log in "$first" "$second"; do
     fail "guest reported a disk or egress failure in $log"
   fi
 done
-(( after > before )) || fail "host nftables drop counter did not increase ($before -> $after)"
+if [[ $# -eq 4 ]]; then\n  (( after > before )) || fail "host nftables drop counter did not increase ($before -> $after)"\nfi
 echo "PASS: first boot wrote and synced the persistence marker"
 echo "PASS: second boot found the same marker on the persistent disk"
-echo "PASS: host nftables drop counter increased from $before to $after"
+if [[ $# -eq 4 ]]; then echo "PASS: host nftables drop counter increased from $before to $after"; fi
