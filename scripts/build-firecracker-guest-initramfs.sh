@@ -28,14 +28,18 @@ echo "NEXARA_GUEST_BOOT_OK"
 mkdir -p /mnt/root
 if ! mount -t ext4 -o rw /dev/vda /mnt/root; then
   echo "NEXARA_DISK_MOUNT_FAILED"
-  exec sh
+  /bin/poweroff -f
 fi
-printf '%s\n' "nexara-persistence-probe-v1" > /mnt/root/nexara-persistence-probe
-sync
 if [ "$(cat /mnt/root/nexara-persistence-probe 2>/dev/null)" = "nexara-persistence-probe-v1" ]; then
-  echo "NEXARA_DISK_WRITE_OK"
+  echo "NEXARA_DISK_PERSISTENCE_PRESENT"
 else
-  echo "NEXARA_DISK_WRITE_FAILED"
+  printf '%s\n' "nexara-persistence-probe-v1" > /mnt/root/nexara-persistence-probe
+  sync
+  if [ "$(cat /mnt/root/nexara-persistence-probe 2>/dev/null)" = "nexara-persistence-probe-v1" ]; then
+    echo "NEXARA_DISK_WRITE_OK"
+  else
+    echo "NEXARA_DISK_WRITE_FAILED"
+  fi
 fi
 if [ -x /bin/nc ]; then
   if nc -z -w 2 1.1.1.1 443 >/dev/null 2>&1; then
@@ -48,7 +52,9 @@ else
 fi
 sync
 echo "NEXARA_GUEST_VALIDATION_COMPLETE"
-exec sh
+sync
+/bin/poweroff -f
+sleep 1
 INIT
 chmod 0755 "$root/init"
 mkdir -p "$(dirname "$output")"
