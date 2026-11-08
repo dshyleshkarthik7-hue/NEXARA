@@ -58,7 +58,10 @@ jobs:
             NEXARA_JAILER_GID="${NEXARA_JAILER_GID:-12345}" \
             NEXARA_KVM_WORKDIR="$RUNNER_TEMP/nexara-kvm-validation" \
             bash scripts/run-firecracker-two-boot.sh "$GITHUB_WORKSPACE/dist/host-binaries"
-      - name: Make evidence readable to artifact uploader\n        if: always()\n        run: sudo chmod -R a+rX "$RUNNER_TEMP/nexara-kvm-validation" 2>/dev/null || true\n      - name: Upload real KVM evidence
+      - name: Make evidence readable to artifact uploader
+        if: always()
+        run: sudo chmod -R a+rX "$RUNNER_TEMP/nexara-kvm-validation" 2>/dev/null || true
+      - name: Upload real KVM evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
