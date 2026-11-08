@@ -119,7 +119,13 @@ export class PersistentVmStorageRegistry {
       || typeof baseDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(baseDigest)) {
       throw new TypeError("Invalid persistent VM disk geometry or base digest");
     }
-    if (await this.getRecord(vmId)) throw new Error("Persistent storage is already registered for this VM");
+    const existing = await this.getRecord(vmId);
+    if (existing) {
+      if (existing.sectors !== sectors || existing.baseDigest !== baseDigest) {
+        throw new Error("Persistent VM identity is already bound to different disk geometry or base image");
+      }
+      return this.resolveDevice(vmId);
+    }
     const baseDevice = await this.#resolveBaseDevice(baseDigest, sectors);
     if (!baseDevice || baseDevice.readOnly !== true || baseDevice.sectors !== sectors) {
       throw new Error("Trusted base-image resolver returned incompatible or writable storage");
