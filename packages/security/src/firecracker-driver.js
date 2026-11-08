@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat } from "node:fs/promises";
+import { lstat, mkdir, copyFile, chmod } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
@@ -69,18 +69,31 @@ export class FirecrackerDriver {
     const handle = { host, started: false, id: config.id };
     try {
       await waitForApi(host.socketPath, this.#timeoutMs);
+      if (typeof host.jailRoot !== "string" || !path.isAbsolute(host.jailRoot)) {
+        throw new Error("Host provider did not expose the Firecracker jail root for image staging");
+      }
+      const rootStat = await lstat(host.jailRoot);
+      if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("Firecracker jail root is not a trusted directory");
+      const artifactDir = path.join(host.jailRoot, "nexara");
+      await mkdir(artifactDir, { mode: 0o755 });
+      const kernelTarget = path.join(artifactDir, "vmlinux");
+      const rootfsTarget = path.join(artifactDir, "rootfs.ext4");
+      await copyFile(manifest.kernelPath, kernelTarget);
+      await copyFile(manifest.rootfsPath, rootfsTarget);
+      await chmod(kernelTarget, 0o644);
+      await chmod(rootfsTarget, 0o644);
       await apiRequest(host.socketPath, "PUT", "/machine-config", {
         vcpu_count: Math.max(1, Math.ceil(config.quotas.cpuMillis / 1000)),
         mem_size_mib: config.quotas.memoryMiB,
         track_dirty_pages: true
       }, this.#timeoutMs);
       await apiRequest(host.socketPath, "PUT", "/boot-source", {
-        kernel_image_path: manifest.kernelPath,
+        kernel_image_path: "/nexara/vmlinux",
         boot_args: typeof manifest.bootArgs === "string" ? manifest.bootArgs : "console=ttyS0 reboot=k panic=1"
       }, this.#timeoutMs);
       await apiRequest(host.socketPath, "PUT", "/drives/rootfs", {
         drive_id: "rootfs",
-        path_on_host: manifest.rootfsPath,
+        path_on_host: "/nexara/rootfs.ext4",
         is_root_device: true,
         is_read_only: manifest.readOnlyRootfs === true
       }, this.#timeoutMs);
