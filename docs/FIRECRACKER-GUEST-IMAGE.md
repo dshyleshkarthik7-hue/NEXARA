@@ -18,7 +18,7 @@ The trusted image resolver should return a manifest containing `kernelPath`, `ke
 
 ## Guest probes
 - `NEXARA_GUEST_BOOT_OK`: Linux reached init.
-- `NEXARA_DISK_WRITE_OK`: marker was written and synced to `/dev/vda` mounted as ext4.
+- `NEXARA_DISK_WRITE_OK`: marker was created and synced on the first boot; `NEXARA_DISK_PERSISTENCE_PRESENT`: the same marker was found on a subsequent boot using the same persistent disk. The guest powers off after the probes so the host can perform a clean write-back.
 - `NEXARA_EGRESS_BLOCKED`: optional BusyBox `nc` probe could not connect to a public test address.
 - `NEXARA_GUEST_VALIDATION_COMPLETE`: guest-side probes finished.
 
