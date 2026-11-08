@@ -4,6 +4,7 @@ import {
   GuestMemory, MemoryBlockDevice, BLOCK_SECTOR_SIZE,
   LegacyBootSectorLoader, LEGACY_BOOT_ADDRESS
 } from "../packages/runtime/src/index.js";
+import { X86RealModeCpu } from "../packages/x86-core/src/index.js";
 
 function makeBootDisk() {
   const disk = new MemoryBlockDevice({ sectors: 4 });
@@ -56,4 +57,20 @@ test("legacy boot loader validates disk LBA, BIOS drive and guest memory window"
   });
   assert.throws(() => loader.prepare({ lba: 4 }), /outside the disk/);
   assert.throws(() => loader.prepare({ drive: 256 }), /one byte/);
+});
+
+test("staged legacy boot sector executes through the 16-bit real-mode interpreter", () => {
+  const disk = new MemoryBlockDevice({ sectors: 1 });
+  const sector = new Uint8Array(512);
+  sector.set([0xb8, 0x34, 0x12, 0xf4]); // MOV AX,1234h; HLT
+  sector[510] = 0x55;
+  sector[511] = 0xaa;
+  disk.writeSectors(0, sector);
+  const memory = new GuestMemory({ initialPages: 8, maximumPages: 8 });
+  const handoff = new LegacyBootSectorLoader({ disk, memory }).prepare();
+  const cpu = new X86RealModeCpu({ memory, cs: handoff.cs, ip: handoff.ip });
+  const result = cpu.run({ maxInstructions: 8 });
+  assert.equal(result.state, "halted");
+  assert.equal(cpu.ax, 0x1234);
+  assert.equal(result.instructionsExecuted, 2);
 });
