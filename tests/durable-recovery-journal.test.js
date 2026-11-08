@@ -55,24 +55,26 @@ test("durable recovery journal rejects tampered disk contents before import", as
 });
 
 
-test("durable recovery journal excludes concurrent replay workers", async t => {
+test("durable recovery journal excludes an active worker lock", async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), "nexara-recovery-lock-"));
   t.after(() => rm(root, { recursive: true, force: true }));
+  const journalDirectory = path.join(root, "journal");
   const source = path.join(root, "guest.raw");
   await writeFile(source, Buffer.alloc(512, 0x41), { mode: 0o600 });
-  const journal = new DurableRecoveryJournal({ directory: path.join(root, "journal") });
+  const journal = new DurableRecoveryJournal({ directory: journalDirectory });
   await journal.save({ vmId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", sourcePath: source });
-  let release;
-  let entered;
-  const enteredPromise = new Promise(resolve => { entered = resolve; });
-  const blocked = new Promise(resolve => { release = resolve; });
-  const first = journal.recoverPending(async () => ({
-    importRaw: async () => { entered(); await blocked; return { changedSectors: 1 }; }
+  await writeFile(path.join(journalDirectory, ".recovery.lock"),
+    JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }) + "\\n",
+    { mode: 0o600 });
+  await assert.rejects(
+    () => journal.recoverPending(async () => ({ importRaw: async () => ({}) })),
+    /already running/
+  );
+  await rm(path.join(journalDirectory, ".recovery.lock"));
+  let imports = 0;
+  await journal.recoverPending(async () => ({
+    importRaw: async () => { imports++; return { changedSectors: 1 }; }
   }));
-  await enteredPromise;
-  const competingJournal = new DurableRecoveryJournal({ directory: path.join(root, "journal") });
-  await assert.rejects(() => competingJournal.recoverPending(async () => ({ importRaw: async () => ({}) })), /already running/);
-  release();
-  await first;
+  assert.equal(imports, 1);
   assert.equal((await journal.list()).length, 0);
 });
