@@ -59,6 +59,59 @@ export class PersistentVmStorageRegistry {
     return record;
   }
 
+  /**
+   * Resolve a stable host-generated VM UUID for a trusted workload key.
+   * The workload key is supplied by the host control plane, never by the guest.
+   */
+  async getOrCreateIdentity({ workloadKey, subject, imageDigest } = {}) {
+    await this.#ready;
+    if (typeof workloadKey !== "string" || workloadKey.length < 1 || workloadKey.length > 256
+      || typeof subject !== "string" || !subject || subject.length > 256
+      || typeof imageDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(imageDigest)) {
+      throw new TypeError("Stable VM identity requires a trusted workload key, subject and image digest");
+    }
+    const keyHash = createHash("sha256").update(workloadKey).digest("hex");
+    const target = path.join(this.#directory, "identity-" + keyHash + ".json");
+    let existing;
+    try {
+      const stat = await lstat(target);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) {
+        throw new Error("Unsafe persistent VM identity record");
+      }
+      existing = JSON.parse(await readFile(target, "utf8"));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (existing) {
+      if (existing.version !== 1 || existing.workloadKeyHash !== keyHash
+        || existing.subject !== subject || existing.imageDigest !== imageDigest
+        || !/^[-a-f0-9]{36}$/i.test(existing.vmId)) {
+        throw new Error("Stable workload identity is already bound to a different tenant or image");
+      }
+      return existing.vmId;
+    }
+    const record = {
+      version: 1, workloadKeyHash: keyHash, subject, imageDigest, vmId: randomUUID()
+    };
+    const temp = path.join(this.#directory, "identity-" + randomUUID() + ".tmp");
+    const file = await open(temp, "wx", 0o600);
+    try { await file.writeFile(JSON.stringify(record) + "\n"); await file.sync(); }
+    finally { await file.close(); }
+    try {
+      // link() is not used: rename is atomic, but concurrent first writers
+      // could race. Recheck immediately before publishing and fail closed.
+      try { await lstat(target); throw new Error("Stable workload identity was concurrently allocated; retry lookup"); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+      await rename(temp, target);
+      await this.#syncDirectory();
+    } catch (error) {
+      await unlink(temp).catch(() => {});
+      if (error.code === "EEXIST") return this.getOrCreateIdentity({ workloadKey, subject, imageDigest });
+      throw error;
+    }
+    return record.vmId;
+  }
+
   /** Create and register a new VM overlay from a trusted immutable base image. */
   async createDevice({ vmId, sectors, baseDigest } = {}) {
     await this.#ready;
