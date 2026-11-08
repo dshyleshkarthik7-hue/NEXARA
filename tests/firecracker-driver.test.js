@@ -46,7 +46,7 @@ async function fixture(t) {
     if (server.listening) await new Promise(resolve => server.close(resolve));
     await rm(directory, { recursive: true, force: true });
   });
-  return { directory, kernel, rootfs, socketPath, requests, provider, resolveImage, get stopped() { return stopped; } };
+  return { directory, kernel, rootfs, jailRoot, socketPath, requests, provider, resolveImage, get stopped() { return stopped; } };
 }
 
 const config = {
