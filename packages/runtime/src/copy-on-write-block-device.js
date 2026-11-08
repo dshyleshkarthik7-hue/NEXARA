@@ -183,6 +183,39 @@ export class CopyOnWriteBlockDevice {
     }
   }
 
+  /** Import a stopped guest's raw disk, persisting only sectors that differ from the immutable base. */
+  async importRaw(sourcePath) {
+    this.#assertOpen();
+    if (typeof sourcePath !== "string" || !path.isAbsolute(sourcePath) || sourcePath === this.filePath) {
+      throw new TypeError("Raw disk source must be a distinct absolute path");
+    }
+    const sourceStat = await lstat(sourcePath);
+    if (!sourceStat.isFile() || sourceStat.isSymbolicLink() || sourceStat.nlink !== 1
+      || (sourceStat.mode & 0o077) !== 0 || sourceStat.size !== this.sectors * BLOCK_SECTOR_SIZE) {
+      throw new Error("Guest raw disk must be a private regular file with matching geometry");
+    }
+    const source = await open(sourcePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    try {
+      const chunkSectors = 256;
+      for (let lba = 0; lba < this.sectors; lba += chunkSectors) {
+        const count = Math.min(chunkSectors, this.sectors - lba);
+        const guestBytes = Buffer.alloc(count * BLOCK_SECTOR_SIZE);
+        await readAll(source, guestBytes, lba * BLOCK_SECTOR_SIZE);
+        const baseBytes = Buffer.from(await this.#base.readSectors(lba, count));
+        for (let i = 0; i < count; i++) {
+          const start = i * BLOCK_SECTOR_SIZE;
+          const guestSector = guestBytes.subarray(start, start + BLOCK_SECTOR_SIZE);
+          const baseSector = baseBytes.subarray(start, start + BLOCK_SECTOR_SIZE);
+          if (!guestSector.equals(baseSector)) {
+            await this.writeSectors(lba + i, guestSector);
+          }
+        }
+      }
+      await this.sync();
+      return Object.freeze({ sectors: this.sectors, changedSectors: await this.changedSectorCount(), format: "nexara-cow-v1" });
+    } finally { await source.close(); }
+  }
+
   /** Materialize a consistent raw disk image for a hypervisor that accepts raw files. */
   async materializeRaw(targetPath) {
     this.#assertOpen();
