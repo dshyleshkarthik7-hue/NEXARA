@@ -154,7 +154,7 @@ test("Firecracker driver attaches a broker-managed copy-on-write disk as raw roo
 test("Firecracker driver rejects broker root disks exceeding lease quota", async t => {
   const f = await fixture(t);
   let starts = 0;
-  const driver = new FirecrackerDriver({ provider: { start: async () => { starts++; }, stop: async () => {} }, resolveImage: f.resolveImage });
+  const driver = new FirecrackerDriver({ provider: { start: async () => { starts++; return {}; }, stop: async () => {} }, resolveImage: f.resolveImage });
   await assert.rejects(() => driver.launch({ ...config, quotas: { ...config.quotas, diskMiB: 1 }, rootfsDevice: { sectors: 4097, materializeRaw: async () => ({}) } }), /Invalid broker-managed root disk/);
   assert.equal(starts, 0);
 });
