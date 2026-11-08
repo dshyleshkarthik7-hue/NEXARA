@@ -82,13 +82,17 @@ export class X86RealModeCpu {
       const carry = this.flags & CF;
       this.#setReg16(opcode - 0x40, result);
       this.#setLogicFlags(result);
-      this.flags = (this.flags & ~CF) | carry;
+      this.flags = (this.flags & ~CF) | carry
+        | ((old & 0x0fff) === 0x0fff ? AF : 0)
+        | (old === 0x7fff ? OF : 0);
     } else if (opcode >= 0x48 && opcode <= 0x4f) {
       const old = this.#reg16(opcode - 0x48), result = (old - 1) & MASK16;
       const carry = this.flags & CF;
       this.#setReg16(opcode - 0x48, result);
       this.#setLogicFlags(result);
-      this.flags = (this.flags & ~CF) | carry;
+      this.flags = (this.flags & ~CF) | carry
+        | ((old & 0x0fff) === 0 ? AF : 0)
+        | (old === 0x8000 ? OF : 0);
     } else if (opcode === 0x31 || opcode === 0x33) {
       const modrm = this.#fetch8();
       if ((modrm & 0xc0) !== 0xc0) throw new Error("Real-mode XOR currently supports register operands only");
