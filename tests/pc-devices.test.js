@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Pic8259, Pit8253 } from "../packages/runtime/src/index.js";
+import { Pic8259, Pit8253, PcAtInterruptFabric, AtaPioDevice, MemoryBlockDevice } from "../packages/runtime/src/index.js";
 
 test("dual 8259 PIC initializes vectors, masks IRQs and acknowledges slave IRQs", () => {
   const pic = new Pic8259();
@@ -41,4 +41,13 @@ test("8253 PIT produces deterministic channel-zero periodic IRQs", () => {
   restored.restore(state);
   assert.equal(restored.counter, pit.counter);
   assert.throws(() => restored.restore({ ...state, counter: 0 }), /Invalid PIT snapshot/);
+});
+
+test("PC I/O fabric routes ATA task-file and 16-bit data accesses", () => {
+  const ata = new AtaPioDevice({ disk: new MemoryBlockDevice({ sectors: 4 }) });
+  const fabric = new PcAtInterruptFabric({ ata });
+  fabric.write(0x1f7, 0xec);
+  assert.equal(fabric.read(0x1f7), 0x48n);
+  assert.equal(fabric.read(0x1f0, 16), 0x0040n);
+  assert.throws(() => fabric.read(0x20, 16), /byte accesses only/);
 });
