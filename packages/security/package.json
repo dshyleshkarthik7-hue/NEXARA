@@ -1,0 +1,10 @@
+{
+  "name": "@nexara/security",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./lease": "./src/lease.js",
+    "./microvm-host": "./src/microvm-host.js"
+  }
+}
