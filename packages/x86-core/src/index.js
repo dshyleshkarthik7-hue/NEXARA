@@ -164,15 +164,35 @@ export class X86Cpu {
       }
       if ((incoming.eflags & 2) === 0) throw new Error("Incoming TSS EFLAGS reserved bit 1 must be set");
       const targetCpl = incoming.segments.cs & 3;
+      // Segment selectors in the incoming task are resolved using the incoming
+      // CR3. Validate them with a temporary paging walker before mutating the
+      // live paging context or any task/descriptor state.
+      let validationPaging = null;
+      if (pagingEnabled) {
+        validationPaging = new X86LegacyPaging32(this.memory, {
+          pse: this.legacyPaging32.pse, writeProtect: this.legacyPaging32.writeProtect
+        });
+        validationPaging.loadCr3(incomingCr3);
+      }
+      const validationGdt = pagingEnabled
+        ? new X86DescriptorTable(this.memory, { base: this.systemTables.gdtr.base, limit: this.systemTables.gdtr.limit, kind: "gdt", longMode: false, paging: validationPaging })
+        : this.gdt;
       let nextLdtr = null;
+      let validationLdt = null;
       let nextLdt = null;
       if ((incoming.segments.ldt & 0xfff8) !== 0) {
-        const ldtDescriptor = this.gdt.readSystemDescriptor(incoming.segments.ldt, { allowedTypes: [2] });
-        if (ldtDescriptor.limit > 0xffffn || ldtDescriptor.base + ldtDescriptor.limit >= BigInt(this.memory.byteLength)) throw new Error("Incoming LDT exceeds guest memory or supported bounds");
+        const ldtDescriptor = validationGdt.readSystemDescriptor(incoming.segments.ldt, { allowedTypes: [2] });
+        if (ldtDescriptor.limit > 0xffffn || ldtDescriptor.base + ldtDescriptor.limit > 0xffffffffn
+          || (!pagingEnabled && ldtDescriptor.base + ldtDescriptor.limit >= BigInt(this.memory.byteLength))) {
+          throw new Error("Incoming LDT exceeds guest linear address space or supported bounds");
+        }
         nextLdtr = { selector: incoming.segments.ldt, base: ldtDescriptor.base, limit: Number(ldtDescriptor.limit), present: true, usable: true };
-        nextLdt = new X86DescriptorTable(this.memory, { base: ldtDescriptor.base, limit: Number(ldtDescriptor.limit), kind: "ldt", longMode: false, paging: taskPaging });
+        validationLdt = new X86DescriptorTable(this.memory, { base: ldtDescriptor.base, limit: Number(ldtDescriptor.limit), kind: "ldt", longMode: false, paging: validationPaging });
+        nextLdt = pagingEnabled
+          ? new X86DescriptorTable(this.memory, { base: ldtDescriptor.base, limit: Number(ldtDescriptor.limit), kind: "ldt", longMode: false, paging: taskPaging })
+          : validationLdt;
       }
-      const nextSegments = new X86SegmentState({ gdt: this.gdt, ldt: nextLdt, cpl: targetCpl, longMode: false });
+      const nextSegments = new X86SegmentState({ gdt: validationGdt, ldt: validationLdt ?? nextLdt, cpl: targetCpl, longMode: false });
       nextSegments.installCodeSegment(incoming.segments.cs);
       nextSegments.loadStack(incoming.segments.ss);
       for (const name of ["es", "ds", "fs", "gs"]) nextSegments.loadData(name, incoming.segments[name]);
@@ -210,6 +230,10 @@ export class X86Cpu {
         ? BigInt(incoming.eflags) | (1n << 14n)
         : reason === "jmp" ? BigInt(incoming.eflags) & ~(1n << 14n) : BigInt(incoming.eflags);
       this.ip = incoming.eip;
+      // Rebind the validated segment caches to the CPU's live descriptor tables,
+      // whose paging backend now reflects the incoming CR3.
+      nextSegments.gdt = this.gdt;
+      nextSegments.ldt = nextLdt;
       this.segments = nextSegments;
       return Object.freeze({ selector, ip: this.ip, cpl: this.segments.cpl, task: this.systemTables.snapshot().task });
     } catch (error) { throw new CpuFault("Task switch failed: " + error.message, this.ip); }
