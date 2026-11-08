@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, open, readFile, readdir, rename, unlink, chmod } from "node:fs/promises";
 import path from "node:path";
 
@@ -46,7 +47,8 @@ export class DurableRecoveryJournal {
       await chmod(diskPath, 0o600);
       const disk = await open(diskPath, "r");
       try { await disk.sync(); } finally { await disk.close(); }
-      const record = { version: 1, id, vmId, diskName, bytes: source.size, createdAt: new Date().toISOString() };
+      const digest = await hashFile(diskPath);
+      const record = { version: 2, id, vmId, diskName, bytes: source.size, digest, createdAt: new Date().toISOString() };
       const file = await open(tempMetadata, "wx", 0o600);
       try { await file.writeFile(JSON.stringify(record) + "\n"); await file.sync(); } finally { await file.close(); }
       await rename(tempMetadata, path.join(this.#directory, metadataName));
@@ -68,9 +70,10 @@ export class DurableRecoveryJournal {
       const stat = await lstat(metadataPath);
       if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) throw new Error("Unsafe recovery metadata file");
       const record = JSON.parse(await readFile(metadataPath, "utf8"));
-      if (record.version !== 1 || name !== record.id + ".json"
+      if (record.version !== 2 || name !== record.id + ".json"
         || !/^[-a-f0-9]{36}$/i.test(record.vmId) || record.diskName !== record.id + ".raw"
-        || !Number.isSafeInteger(record.bytes) || record.bytes < 1) {
+        || !Number.isSafeInteger(record.bytes) || record.bytes < 1
+        || typeof record.digest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(record.digest)) {
         throw new Error("Invalid recovery journal record");
       }
       const diskPath = path.join(this.#directory, record.diskName);
@@ -79,6 +82,7 @@ export class DurableRecoveryJournal {
         || diskStat.size !== record.bytes || (diskStat.mode & 0o077) !== 0) {
         throw new Error("Recovery disk is missing or unsafe");
       }
+      if (await hashFile(diskPath) !== record.digest) throw new Error("Recovery disk integrity check failed");
       records.push(Object.freeze({ ...record, diskPath }));
     }
     return records;
@@ -89,8 +93,11 @@ export class DurableRecoveryJournal {
     if (typeof id !== "string" || !/^[-a-f0-9]{36}$/i.test(id)) throw new TypeError("Invalid recovery record id");
     const diskPath = path.join(this.#directory, id + ".raw");
     const metadataPath = path.join(this.#directory, id + ".json");
-    await unlink(diskPath);
+    // Remove the metadata first. A crash after this point can leave only an
+    // unreferenced raw file; the reverse order would leave a broken record
+    // that prevents the whole journal from being replayed.
     await unlink(metadataPath);
+    await unlink(diskPath).catch(error => { if (error.code !== "ENOENT") throw error; });
     const dir = await open(this.#directory, "r");
     try { await dir.sync(); } finally { await dir.close(); }
   }
@@ -108,4 +115,11 @@ export class DurableRecoveryJournal {
     }
     return results;
   }
+}
+
+
+async function hashFile(filePath) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk);
+  return "sha256:" + hash.digest("hex");
 }
