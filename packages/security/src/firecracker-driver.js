@@ -151,6 +151,7 @@ export class FirecrackerDriver {
       }
     } finally {
       handle.started = false;
+      handle.writebackPending = Boolean(handle.materializedRootfs && handle.rootfsDevice);
       await this.#provider.stop(handle.host);
       handle.stopped = true;
       if (handle.materializedRootfs && handle.rootfsDevice) {
