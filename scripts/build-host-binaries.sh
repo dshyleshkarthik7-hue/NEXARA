@@ -22,8 +22,11 @@ git -C "$FC_SRC" submodule update --init --recursive
   cargo build --release --locked --bin firecracker
   cargo build --release --locked -p jailer --bin jailer
 )
-install -m 0755 "$FC_SRC/target/release/firecracker" "$OUT/firecracker"
-install -m 0755 "$FC_SRC/target/release/jailer" "$OUT/jailer"
+FC_TARGET="$FC_SRC/build/cargo_target/release"
+[[ -x "$FC_TARGET/firecracker" ]] || fail "Firecracker binary missing from expected Cargo target directory: $FC_TARGET"
+[[ -x "$FC_TARGET/jailer" ]] || fail "jailer binary missing from expected Cargo target directory: $FC_TARGET"
+install -m 0755 "$FC_TARGET/firecracker" "$OUT/firecracker"
+install -m 0755 "$FC_TARGET/jailer" "$OUT/jailer"
 if [[ ! -d "$BB_SRC/.git" ]]; then git clone --filter=blob:none https://github.com/mirror/busybox.git "$BB_SRC"; fi
 git -C "$BB_SRC" fetch --tags --force
 git -C "$BB_SRC" checkout --detach "$BB_TAG"
