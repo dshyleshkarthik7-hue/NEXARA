@@ -17,7 +17,7 @@ jobs:
       - name: Check out trusted main branch
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
       - name: Download successful native build artifact
         if: github.event_name == 'workflow_run'
@@ -28,6 +28,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
           run-id: ${{ github.event.workflow_run.id }}
+      - name: Install host validation utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 nftables curl file binutils cpio e2fsprogs python3 procps
       - name: Require externally prepared cgroup delegation
         env:
           NEXARA_JAILER_PARENT_CGROUP: ${{ vars.NEXARA_JAILER_PARENT_CGROUP }}
