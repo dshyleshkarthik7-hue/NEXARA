@@ -157,6 +157,10 @@ export class X86Cpu {
       if (targetDescriptor.limit < 0x67n || targetDescriptor.base > 0xffffffffn) throw new Error("Target TSS must be a bounded 32-bit TSS with a 104-byte header");
       const targetTss = new X86Tss32(this.memory, { base: targetDescriptor.base, limit: Number(targetDescriptor.limit) });
       const incoming = targetTss.getTaskState();
+      const incomingCr3 = BigInt(targetTss.cr3);
+      if ((incomingCr3 & 0xfffn) !== 0n || incomingCr3 >= BigInt(this.memory.byteLength)) {
+        throw new Error("Incoming TSS CR3 must be an aligned in-range page-directory base");
+      }
       if ((incoming.eflags & 2) === 0) throw new Error("Incoming TSS EFLAGS reserved bit 1 must be set");
       const targetCpl = incoming.segments.cs & 3;
       let nextLdtr = null;
@@ -193,7 +197,7 @@ export class X86Cpu {
       this.systemTables.loadTaskRegister({ selector, base: targetDescriptor.base, limit: Number(targetDescriptor.limit), present: true, busy: true, usable: true });
       this.#syncDescriptorTables();
       for (let i = 0; i < 8; i++) this.setRegister(i, BigInt(incoming.registers[["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"][i]]), 32);
-      this.controlRegisters.set(3, BigInt(targetTss.cr3));
+      this.writeControlRegister(3, incomingCr3);
       this.flags = (reason === "task-gate" || reason === "call")
         ? BigInt(incoming.eflags) | (1n << 14n)
         : BigInt(incoming.eflags) & ~(1n << 14n); // CALL/task-gate switches establish nested-task state.
