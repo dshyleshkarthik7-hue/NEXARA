@@ -25,7 +25,7 @@ await server.listen({ host: "127.0.0.1", port: 8788 });
 server.addHook("onClose", async () => host.close());
 ```
 
-The provider and both resolvers are host-trusted dependencies. In particular, `resolveBaseDevice(digest)` must return a read-only block device whose bytes hash to that digest; it must not accept guest-supplied paths. `authorizeVmRequest({ identity, request })` must enforce tenant quotas, image allowlists, capability grants, egress policy, and lease duration, returning the server-approved policy. The API never signs privileges directly from client input.
+The provider and all adapter callbacks are host-trusted dependencies. In particular, `resolveBaseDevice(digest)` must return a read-only block device whose bytes hash to that digest; it must not accept guest-supplied paths. `authorizeVmRequest({ identity, request })` must enforce tenant quotas, image allowlists, capability grants, egress policy, and lease duration, returning the server-approved policy. The API never signs privileges directly from client input.
 
 ## Persistent state layout
 
@@ -44,4 +44,4 @@ The registry reopens overlays only after validating private file metadata, geome
 - Close the returned host during graceful shutdown.
 - Exercise this on a Linux host with KVM, Firecracker, jailer and the configured network provider before production use.
 
-The existing terminal/PTY server is a separate backend and does not automatically become a Firecracker API. A deployment that exposes VM operations must await this bootstrap in its own host-service entrypoint and add its own authenticated API layer.
+The server supports this bootstrap when `NEXARA_EXECUTION_BACKEND=microvm` and exposes authenticated `/api/vms` create/list/stop routes. The separate terminal/PTY API remains a distinct backend and is not silently substituted for Firecracker.
