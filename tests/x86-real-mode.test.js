@@ -25,22 +25,18 @@ test("16-bit real-mode interpreter executes a small boot-sector instruction sequ
   assert.equal(cpu.ip, 0x7c0b);
 });
 
-test("real-mode byte registers, XOR flags, stack push/pop and near CALL/RET work", () => {
+test("real-mode byte registers and 16-bit XOR update the register and flags", () => {
   const { cpu } = cpuFor([
-    0xb4,0x7f,             // MOV AH,7Fh
-    0x30,0xe4,             // unsupported 8-bit XOR currently intentionally not accepted
-    0x50,                  // PUSH AX
-    0xb8,0,0,              // MOV AX,0
-    0x5b,                  // POP BX
-    0xe8,0x01,0x00,        // CALL +1
-    0xeb,0x01,             // JMP over RET
-    0xc3,                  // RET
-    0xf4                   // HLT
+    0xb4,0x7f, // MOV AH,7Fh
+    0xb0,0x01, // MOV AL,01h
+    0x31,0xc0, // XOR AX,AX
+    0xf4
   ]);
-  assert.equal(cpu.step().state, "running");
-  assert.equal(cpu.ax, 0x7f00);
-  assert.throws(() => cpu.step(), /Unsupported real-mode opcode 0x30/);
-  assert.equal(cpu.ip, 0x7c03);
+  const result = cpu.run({ maxInstructions: 8 });
+  assert.equal(result.state, "halted");
+  assert.equal(cpu.ax, 0);
+  assert.equal(cpu.flags & 0x40, 0x40);
+  assert.equal(cpu.flags & 0x04, 0x04);
 });
 
 test("real-mode stack and near control transfers preserve 16-bit return offsets", () => {
@@ -60,16 +56,16 @@ test("real-mode stack and near control transfers preserve 16-bit return offsets"
   assert.equal(cpu.sp, 0x7c00);
 });
 
-test("real-mode A20 gate wraps physical addresses until enabled", () => {
-  const { memory } = cpuFor([0xf4]);
-  memory.write(0, Uint8Array.of(0x11));
-  memory.write(0x100000, Uint8Array.of(0x22));
-  const wrapped = new X86RealModeCpu({ memory, cs: 0xffff, ip: 0x10, a20Enabled: false });
-  const enabled = new X86RealModeCpu({ memory, cs: 0xffff, ip: 0x10, a20Enabled: true });
-  assert.equal(wrapped.step().state, "halted");
-  assert.equal(enabled.step().state, "halted");
-  assert.equal(wrapped.ip, 0x11);
-  assert.equal(enabled.ip, 0x11);
+test("real-mode A20 gate wraps data addresses until enabled", () => {
+  const { memory } = cpuFor([0xa1,0x10,0x00,0xf4]);
+  memory.write(0, Uint8Array.of(0x11,0x11));
+  memory.write(0x100000, Uint8Array.of(0x22,0x22));
+  const wrapped = new X86RealModeCpu({ memory, ds: 0xffff, a20Enabled: false });
+  const enabled = new X86RealModeCpu({ memory, ds: 0xffff, a20Enabled: true });
+  wrapped.step();
+  enabled.step();
+  assert.equal(wrapped.ax, 0x1111);
+  assert.equal(enabled.ax, 0x2222);
 });
 
 test("unsupported real-mode opcode faults without consuming its byte", () => {
