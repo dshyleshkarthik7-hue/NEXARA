@@ -5,8 +5,9 @@ const MASK16 = 0xffff;
 
 /**
  * Small 8086-style real-mode interpreter for boot-path experiments.
- * Implements only the documented opcode subset below; no BIOS services,
- * protected-mode transitions, DMA, or complete 8086 compatibility.
+ * Implements only the documented opcode subset below; optional host-trapped
+ * interrupts are injected by the caller. This is not firmware, DMA, or full
+ * 8086 compatibility.
  */
 export class X86RealModeCpu {
   constructor({ memory, cs = 0, ip = 0x7c00, ds = 0, es = 0, ss = 0, sp = 0x7c00, a20Enabled = false, interruptHandler = null } = {}) {
