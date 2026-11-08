@@ -98,7 +98,7 @@ export class VmSupervisor {
     } catch (error) {
       record.state = "failed";
       this.#instances.delete(id);
-      if (rootfsDevice && this.#releaseRootDisk) await this.#releaseRootDisk(id).catch(() => {});
+      if (rootfsDevice && this.#releaseRootDisk) await this.#releaseRootDisk(id, rootfsDevice).catch(() => {});
       throw error;
     }
   }
@@ -169,7 +169,7 @@ export class VmSupervisor {
     record.state = "stopping";
     try {
       if (record.handle) await this.#driver.stop(record.handle);
-      if (record.rootfsDevice && this.#releaseRootDisk) await this.#releaseRootDisk(id);
+      if (record.rootfsDevice && this.#releaseRootDisk) await this.#releaseRootDisk(id, record.rootfsDevice);
       record.state = "stopped";
       this.#instances.delete(id);
       return true;
