@@ -276,3 +276,38 @@ test("real-mode direct accumulator MOV honors segment override prefixes", () => 
   assert.equal(result.state, "halted");
   assert.equal(cpu.ax, 0x2222);
 });
+
+
+test("real-mode immediate arithmetic group supports ADD, SUB and CMP byte/word forms", () => {
+  const { cpu } = cpuFor([
+    0xb8,0x00,0x00,       // MOV AX,0
+    0x05,0x01,0x00,       // ADD AX,1
+    0x83,0xc0,0xff,       // ADD AX,-1
+    0x80,0xe8,0x01,       // SUB AL,1
+    0x81,0xf8,0xff,0xff,  // CMP AX,FFFFh
+    0xf4
+  ]);
+  const result = cpu.run({ maxInstructions: 8 });
+  assert.equal(result.state, "halted");
+  assert.equal(cpu.ax, 0);
+  assert.equal(cpu.flags & 0x40, 0x40);
+  assert.equal(cpu.flags & 1, 0);
+});
+
+test("real-mode immediate arithmetic preserves operands for CMP and reports borrow", () => {
+  const { cpu } = cpuFor([
+    0xb8,0x00,0x00,       // MOV AX,0
+    0x81,0xf8,0x01,0x00,  // CMP AX,1
+    0xf4
+  ]);
+  cpu.run({ maxInstructions: 4 });
+  assert.equal(cpu.ax, 0);
+  assert.equal(cpu.flags & 1, 1);
+  assert.equal(cpu.flags & 0x80, 0x80);
+});
+
+test("unsupported immediate arithmetic group operations fault explicitly", () => {
+  const { cpu } = cpuFor([0x80,0xc8,0x01]); // OR AL,1 (/1)
+  assert.throws(() => cpu.step(), /Unsupported immediate arithmetic group operation \/1/);
+  assert.equal(cpu.ip, 0x7c00);
+});
