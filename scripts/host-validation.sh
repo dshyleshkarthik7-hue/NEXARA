@@ -18,7 +18,8 @@ for binary in "$FIRECRACKER_BIN" "$JAILER_BIN"; do
   mode="$(stat -c '%a' "$binary")"
   (( (8#$mode & 0022) == 0 )) || fail "binary is group/other writable: $binary"
 done
-grep -qw seccomp /proc/sys/kernel/seccomp/actions_avail || fail "kernel seccomp unavailable"
+[[ -r /proc/sys/kernel/seccomp/actions_avail ]] || fail "kernel seccomp action interface unavailable"
+grep -qw allow /proc/sys/kernel/seccomp/actions_avail || fail "kernel seccomp action interface is incomplete"
 echo "== Host prerequisites =="
 uname -a
 "$FIRECRACKER_BIN" --version
