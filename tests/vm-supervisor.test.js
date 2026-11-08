@@ -160,3 +160,39 @@ test("supervisor releases persistent disk handles after stop and failed launch",
   assert.equal(released.length, 2);
   await failed.close();
 });
+
+
+test("supervisor restores a stable VM UUID from trusted workload identity", async () => {
+  const ids = new Map();
+  const resolver = async ({ workloadKey, subject, imageDigest }) => {
+    const key = subject + ":" + workloadKey + ":" + imageDigest;
+    if (!ids.has(key)) ids.set(key, "12345678-1234-4234-8234-123456789abc");
+    return ids.get(key);
+  };
+  const makeSupervisor = () => new VmSupervisor({
+    authority,
+    driver: { isolationType: "microvm", launch: async () => ({}), stop: async () => {} },
+    clock: () => 1010,
+    resolveVmIdentity: resolver
+  });
+  const first = makeSupervisor();
+  const a = await first.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest, workloadKey: "workspace-7" });
+  assert.equal(a.id, "12345678-1234-4234-8234-123456789abc");
+  await first.close();
+  const restarted = makeSupervisor();
+  const b = await restarted.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest, workloadKey: "workspace-7" });
+  assert.equal(b.id, a.id);
+  await restarted.close();
+});
+
+test("supervisor rejects invalid persistent identity resolver output", async () => {
+  const supervisor = new VmSupervisor({
+    authority,
+    driver: { isolationType: "microvm", launch: async () => ({}), stop: async () => {} },
+    clock: () => 1010,
+    resolveVmIdentity: async () => "../../not-a-uuid"
+  });
+  await assert.rejects(() => supervisor.create({
+    envelope: lease(), subject: "tenant-1", imageDigest: digest, workloadKey: "workspace-7"
+  }), /invalid UUID/);
+});
