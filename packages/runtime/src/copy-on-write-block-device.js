@@ -40,7 +40,7 @@ export class CopyOnWriteBlockDevice {
     }
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const root = await lstat(directory);
-    if (!root.isDirectory() || root.isSymbolicLink()) throw new Error("Overlay storage root must be a real directory");
+    if (!root.isDirectory() || root.isSymbolicLink() || (root.mode & 0o077) !== 0) throw new Error("Overlay storage root must be a private directory with mode 0700");
     const actualBaseDigest = await digestDevice(baseDevice, sectors);
     if (actualBaseDigest !== baseDigest) throw new Error("Base image digest does not match immutable disk contents");
     const filePath = path.join(directory, vmId + ".overlay");
@@ -55,7 +55,7 @@ export class CopyOnWriteBlockDevice {
     } else handle = await open(filePath, flags);
     try {
       const stat = await handle.stat();
-      if (!stat.isFile()) throw new Error("Overlay image must be a regular file");
+      if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) throw new Error("Overlay image must be a private regular file with one link and mode 0600");
       const bitmapBytes = Math.ceil(sectors / 8);
       const expectedBytes = HEADER_SIZE + bitmapBytes + sectors * BLOCK_SECTOR_SIZE;
       if (stat.size === 0 && create) {
@@ -110,17 +110,28 @@ export class CopyOnWriteBlockDevice {
     const count = source.byteLength / BLOCK_SECTOR_SIZE;
     this.#range(lba, count);
     const bytes = Buffer.from(source.buffer, source.byteOffset, source.byteLength);
-    // Data reaches disk before its bitmap bit is published. A crash can lose
-    // the latest write, but cannot expose an uninitialized overlay sector.
+    // Persist sector payloads before publishing allocation bits. This
+    // ordering prevents recovery from exposing stale/uninitialized sectors.
     for (let i = 0; i < count; i++) {
       const sector = lba + i;
       await writeAll(this.#handle, bytes.subarray(i * BLOCK_SECTOR_SIZE, (i + 1) * BLOCK_SECTOR_SIZE),
         this.#dataOffset + sector * BLOCK_SECTOR_SIZE);
+    }
+    await this.#handle.datasync();
+    const changedBytes = new Map();
+    for (let i = 0; i < count; i++) {
+      const sector = lba + i;
       const position = this.#bitmapOffset + (sector >> 3);
-      const bit = Buffer.alloc(1);
-      await readAll(this.#handle, bit, position);
-      bit[0] |= 1 << (sector & 7);
-      await writeAll(this.#handle, bit, position);
+      let value = changedBytes.get(position);
+      if (value === undefined) {
+        const bit = Buffer.alloc(1);
+        await readAll(this.#handle, bit, position);
+        value = bit[0];
+      }
+      changedBytes.set(position, value | (1 << (sector & 7)));
+    }
+    for (const [position, value] of changedBytes) {
+      await writeAll(this.#handle, Buffer.from([value]), position);
     }
   }
 
