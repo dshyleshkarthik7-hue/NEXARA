@@ -46,7 +46,7 @@ run_boot(){
     --chroot-base-dir "$base" --netns "/var/run/netns/$ns" --new-pid-ns \
     --cgroup-version 2 --parent-cgroup "$NEXARA_JAILER_PARENT_CGROUP" \
     --cgroup memory.max=268435456 --cgroup pids.max=64 --cgroup "cpu.max=100000 100000" \
-    -- "$FC" --api-sock /run/firecracker.socket >"$log" 2>&1 &
+    -- --api-sock /run/firecracker.socket >"$log" 2>&1 &
   local jailer_pid=$!
   local fc_pid=""
   for _ in $(seq 1 100); do
@@ -92,7 +92,7 @@ run_boot(){
 run_boot 1
 run_boot 2
 bash "$(dirname "$0")/verify-two-boot-guest-evidence.sh" \
-  "$work/boot-1.serial.log" "$work/boot-2.serial.log" 0 1
+  "$work/boot-1.serial.log" "$work/boot-2.serial.log"
 mkdir -m 0700 -p "$work/evidence"
 cp "$work/boot-1.serial.log" "$work/boot-2.serial.log" "$work/evidence/"
 sha256sum "$work/evidence/"*.serial.log "$work/persistent.ext4" > "$work/evidence/SHA256SUMS"
