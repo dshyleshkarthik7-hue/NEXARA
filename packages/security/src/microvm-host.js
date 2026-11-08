@@ -52,7 +52,8 @@ export async function createMicroVmHost({
   const supervisor = new VmSupervisor({
     authority, driver, clock, limits, recoveryJournal: journal,
     resolveRecoveryDevice: registry.resolveDevice,
-    rootDiskFactory
+    rootDiskFactory,
+    releaseRootDisk: vmId => registry.release(vmId)
   });
 
   try {
