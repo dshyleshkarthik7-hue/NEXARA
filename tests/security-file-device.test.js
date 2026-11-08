@@ -28,7 +28,7 @@ test("capability broker mediates persistent block-device reads and writes", asyn
     const result = await broker.readBlockDevice({ lba: 2, count: 1, device });
     assert.equal(result[0], 0x7c);
     await assert.rejects(() => broker.writeBlockDevice({
-      lba: 8, data: new Uint8Array(512), device
+      lba: 32768, data: new Uint8Array(512), device
     }), /quota/);
   } finally {
     await device?.close();
