@@ -33,13 +33,11 @@ test("two-boot evidence verifier accepts matching guest and firewall evidence", 
   await writeFile(first, [
     "NEXARA_GUEST_BOOT_OK",
     "NEXARA_DISK_WRITE_OK",
-    "NEXARA_EGRESS_BLOCKED",
     "NEXARA_GUEST_VALIDATION_COMPLETE"
   ].join("\n"));
   await writeFile(second, [
     "NEXARA_GUEST_BOOT_OK",
     "NEXARA_DISK_PERSISTENCE_PRESENT",
-    "NEXARA_EGRESS_BLOCKED",
     "NEXARA_GUEST_VALIDATION_COMPLETE"
   ].join("\n"));
   const result = spawnSync("bash", [
@@ -54,13 +52,13 @@ test("two-boot evidence verifier rejects missing persistence and unchanged firew
   t.after(() => rm(root, { recursive: true, force: true }));
   const first = path.join(root, "first.log");
   const second = path.join(root, "second.log");
-  await writeFile(first, "NEXARA_GUEST_BOOT_OK\nNEXARA_DISK_WRITE_OK\nNEXARA_EGRESS_BLOCKED\nNEXARA_GUEST_VALIDATION_COMPLETE\n");
-  await writeFile(second, "NEXARA_GUEST_BOOT_OK\nNEXARA_EGRESS_BLOCKED\nNEXARA_GUEST_VALIDATION_COMPLETE\n");
+  await writeFile(first, "NEXARA_GUEST_BOOT_OK\nNEXARA_DISK_WRITE_OK\nNEXARA_GUEST_VALIDATION_COMPLETE\n");
+  await writeFile(second, "NEXARA_GUEST_BOOT_OK\nNEXARA_GUEST_VALIDATION_COMPLETE\n");
   const missingMarker = spawnSync("bash", [
     "scripts/verify-two-boot-guest-evidence.sh", first, second, "14", "18"
   ], { encoding: "utf8" });
   assert.notEqual(missingMarker.status, 0);
-  await writeFile(second, "NEXARA_GUEST_BOOT_OK\nNEXARA_DISK_PERSISTENCE_PRESENT\nNEXARA_EGRESS_BLOCKED\nNEXARA_GUEST_VALIDATION_COMPLETE\n");
+  await writeFile(second, "NEXARA_GUEST_BOOT_OK\nNEXARA_DISK_PERSISTENCE_PRESENT\nNEXARA_GUEST_VALIDATION_COMPLETE\n");
   const unchangedCounter = spawnSync("bash", [
     "scripts/verify-two-boot-guest-evidence.sh", first, second, "14", "14"
   ], { encoding: "utf8" });
