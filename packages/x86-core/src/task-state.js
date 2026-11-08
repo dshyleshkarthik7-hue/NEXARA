@@ -72,6 +72,47 @@ export class X86Tss32 {
     return this.getRingStack(ring);
   }
 
+  get backlink() { return this.#read16(0); }
+  set backlink(value) { this.#write16(0, value); }
+
+  /** Read the saved 32-bit hardware-task register image from the TSS. */
+  getTaskState() {
+    const registers = {};
+    for (const [name, offset] of Object.entries({ eax: 40, ecx: 44, edx: 48, ebx: 52, esp: 56, ebp: 60, esi: 64, edi: 68 })) {
+      registers[name] = this.#read32(offset);
+    }
+    const segments = {};
+    for (const [name, offset] of Object.entries({ es: 72, cs: 76, ss: 80, ds: 84, fs: 88, gs: 92, ldt: 96 })) {
+      segments[name] = this.#read16(offset);
+    }
+    return Object.freeze({ eip: this.#read32(32), eflags: this.#read32(36),
+      registers: Object.freeze(registers), segments: Object.freeze(segments) });
+  }
+
+  /** Save a complete 32-bit task register image after validating every field. */
+  setTaskState(state) {
+    if (!state || typeof state !== "object" || !state.registers || !state.segments) {
+      throw new TypeError("TSS task state requires registers and segment selectors");
+    }
+    const values32 = { eip: state.eip, eflags: state.eflags, ...state.registers };
+    const values16 = state.segments;
+    const registerOffsets = { eip: 32, eflags: 36, eax: 40, ecx: 44, edx: 48, ebx: 52, esp: 56, ebp: 60, esi: 64, edi: 68 };
+    const segmentOffsets = { es: 72, cs: 76, ss: 80, ds: 84, fs: 88, gs: 92, ldt: 96 };
+    this.#offset(32, 66);
+    for (const name of Object.keys(registerOffsets)) {
+      let value;
+      try { value = BigInt(values32[name]); } catch { throw new TypeError("TSS task register " + name + " must be an integer"); }
+      if (value < 0n || value > U32_MAX) throw new RangeError("TSS task register " + name + " must be 32-bit");
+    }
+    for (const name of Object.keys(segmentOffsets)) {
+      if (!Number.isInteger(values16[name]) || values16[name] < 0 || values16[name] > 0xffff) {
+        throw new RangeError("TSS task selector " + name + " must be 16-bit");
+      }
+    }
+    for (const [name, offset] of Object.entries(registerOffsets)) this.#write32(offset, values32[name]);
+    for (const [name, offset] of Object.entries(segmentOffsets)) this.#write16(offset, values16[name]);
+    return this.getTaskState();
+  }
   get ioMapBase() { return this.#read16(102); }
   set ioMapBase(value) {
     if (!Number.isInteger(value) || value < 0 || value > 0xffff) throw new RangeError("I/O map base must be 16-bit");
