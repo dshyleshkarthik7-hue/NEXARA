@@ -55,6 +55,15 @@ export class AtaPioDevice {
     return this.lbaLow | (this.lbaMid << 8) | (this.lbaHigh << 16) | ((this.driveHead & 0x0f) << 24);
   }
 
+  #completeSector() {
+    this.sectorCount = (this.sectorCount - 1) & 0xff;
+    const next = (this.#lba() + 1) & 0x0fffffff;
+    this.lbaLow = next & 0xff;
+    this.lbaMid = (next >>> 8) & 0xff;
+    this.lbaHigh = (next >>> 16) & 0xff;
+    this.driveHead = (this.driveHead & 0xf0) | ((next >>> 24) & 0x0f);
+  }
+
   #fail() {
     this.error = ERROR_ABRT;
     this.status = STATUS_DRDY | STATUS_ERR;
@@ -107,6 +116,7 @@ export class AtaPioDevice {
       }
       const value = this.transfer[this.transferIndex++];
       if (this.transferIndex === 256) {
+        this.#completeSector();
         this.transfer = null;
         this.transferKind = null;
         this.transferIndex = 0;
@@ -146,7 +156,7 @@ export class AtaPioDevice {
         }
         try {
           this.disk.writeSectors(this.#lba(), bytes);
-          this.sectorCount = 0;
+          this.#completeSector();
           this.status = STATUS_DRDY;
         } catch {
           this.#fail();
