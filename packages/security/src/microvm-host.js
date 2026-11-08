@@ -1,4 +1,4 @@
-import { lstat } from "node:fs/promises";
+import { lstat, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { DurableRecoveryJournal } from "./durable-recovery-journal.js";
 import { FirecrackerDriver } from "./firecracker-driver.js";
@@ -17,6 +17,11 @@ export async function createMicroVmHost({
   if (typeof stateDirectory !== "string" || typeof overlayDirectory !== "string"
     || !authority || typeof resolveImage !== "function" || typeof resolveBaseDevice !== "function") {
     throw new TypeError("MicroVM host requires authority, image/base resolvers, and persistent storage directories");
+  }
+  await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  const stateStat = await lstat(stateDirectory);
+  if (!stateStat.isDirectory() || stateStat.isSymbolicLink() || (stateStat.mode & 0o077) !== 0) {
+    throw new Error("MicroVM host state directory must be private and non-symlink");
   }
   const registry = new PersistentVmRegistry({
     directory: path.join(stateDirectory, "vm-registry"),
