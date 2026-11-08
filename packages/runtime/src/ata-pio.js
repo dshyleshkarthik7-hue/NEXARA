@@ -116,7 +116,7 @@ export class AtaPioDevice {
       }
       const value = this.transfer[this.transferIndex++];
       if (this.transferIndex === 256) {
-        this.#completeSector();
+        if (this.transferKind === "read") this.#completeSector();
         this.transfer = null;
         this.transferKind = null;
         this.transferIndex = 0;
@@ -195,7 +195,7 @@ export class AtaPioDevice {
     const byteFields = ["features", "error", "sectorCount", "lbaLow", "lbaMid", "lbaHigh", "driveHead", "status", "command"];
     if (!state || state.format !== "nexara-ata-pio-v1"
       || byteFields.some(key => !Number.isInteger(state[key]) || state[key] < 0 || state[key] > 255)
-      || !Number.isInteger(state.transferIndex) || state.transferIndex < 0 || state.transferIndex > 256
+      || !Number.isInteger(state.transferIndex) || state.transferIndex < 0 || state.transferIndex > 255
       || !(state.transfer === null || (state.transfer instanceof Uint16Array && state.transfer.length === 256))
       || !([null, "identify", "read", "write"].includes(state.transferKind))
       || ((state.transfer === null) !== (state.transferKind === null))
