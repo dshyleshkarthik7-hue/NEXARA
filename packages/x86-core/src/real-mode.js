@@ -314,7 +314,7 @@ export class X86RealModeCpu {
           else if (operation === 1) { carry = value & 1; value = (value >>> 1) | (carry ? sign : 0); }
           else if (operation === 4 || operation === 6) { carry = (value & sign) ? 1 : 0; value = (value << 1) & mask; }
           else if (operation === 5) { carry = value & 1; value >>>= 1; }
-          else { carry = value & 1; value = (value >>> 1) | (value & sign); }
+          else { const negative = Boolean(value & sign); carry = value & 1; value = (value >>> 1) | (negative ? sign : 0); }
         }
         const oldCarry = this.flags & CF;
         let updated = this.flags & ~(CF | OF);
