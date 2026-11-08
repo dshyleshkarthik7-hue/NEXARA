@@ -1054,6 +1054,10 @@ export class X86Cpu {
             const access = descriptor.raw[5];
             const base = descriptor.base;
             const limit = descriptor.limit;
+            if (Math.max(this.segments.cpl, selector & 3) > descriptor.dpl) {
+              throw new Error("LLDT/LTR selector privilege exceeds system descriptor DPL");
+            }
+            if (limit > 0xffffn) throw new Error("LLDT/LTR descriptor limit exceeds supported 64-KiB table/TSS bound");
             if (extension === 2) {
               if (limit < 7n) throw new Error("LLDT descriptor limit is too small");
               this.systemTables.loadLdtr({ selector, base, limit: Number(limit), present: true, usable: true });
