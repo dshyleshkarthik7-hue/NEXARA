@@ -108,3 +108,22 @@ test("Firecracker driver tears down jailed worker when API configuration fails",
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(f.requests.length, 0);
 });
+
+test("Firecracker driver rejects a root disk larger than the signed disk quota", async t => {
+  const f = await fixture(t);
+  const oversized = Buffer.alloc(1024 * 1024 + 1, 0x5a);
+  await writeFile(f.rootfs, oversized);
+  let starts = 0;
+  const driver = new FirecrackerDriver({
+    provider: { start: async () => { starts++; }, stop: async () => {} },
+    resolveImage: async imageDigest => ({
+      digest: imageDigest, kernelPath: f.kernel, rootfsPath: f.rootfs,
+      kernelDigest: digest(Buffer.from("test-kernel-image")),
+      rootfsDigest: digest(oversized)
+    })
+  });
+  await assert.rejects(() => driver.launch({
+    ...config, quotas: { ...config.quotas, diskMiB: 1 }
+  }), /exceeds the leased disk quota/);
+  assert.equal(starts, 0);
+});
