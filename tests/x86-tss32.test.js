@@ -150,3 +150,59 @@ test("CPU task-state save and restore refuse paging until TSS linear accesses ar
   assert.throws(() => cpu.saveTaskStateToTss(), /paging enabled/);
   assert.throws(() => cpu.loadTaskStateFromTss(), /paging enabled/);
 });
+
+function writeTssDescriptor(memory, gdtBase, index, base, access) {
+  const limit = 0x67;
+  memory.write(gdtBase + index * 8, Uint8Array.from([
+    limit & 0xff, (limit >>> 8) & 0xff, base & 0xff, (base >>> 8) & 0xff,
+    (base >>> 16) & 0xff, access, (limit >>> 16) & 0x0f, (base >>> 24) & 0xff
+  ]));
+}
+
+test("executes a 32-bit far JMP task switch to an available TSS", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x700 });
+  const gdtBase = 0x100;
+  const putCodeData = (index, access) => memory.write(gdtBase + index * 8, Uint8Array.from([0xff,0xff,0,0,0,access,0xcf,0]));
+  putCodeData(1, 0x9a); putCodeData(2, 0x92);
+  writeTssDescriptor(memory, gdtBase, 5, 0x500, 0x8b); // current busy TSS
+  writeTssDescriptor(memory, gdtBase, 6, 0x600, 0x89); // target available TSS
+  cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
+  cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  const oldTss = new X86Tss32(memory, { base: 0x500, limit: 0x67 });
+  const newTss = new X86Tss32(memory, { base: 0x600, limit: 0x67 });
+  newTss.setTaskState({ eip: 0x750, eflags: 0x202,
+    registers: { eax: 0x11, ecx: 0x22, edx: 0x33, ebx: 0x44, esp: 0x1f00, ebp: 0x66, esi: 0x77, edi: 0x88 },
+    segments: { es: 0x10, cs: 0x08, ss: 0x10, ds: 0x10, fs: 0x10, gs: 0x10, ldt: 0 } });
+  memory.write(0x700, Uint8Array.of(0xea, 0x00, 0x08, 0x00, 0x00, 0x30, 0x00));
+  cpu.setRegister(0, 0xaabb, 32); cpu.setRegister(4, 0x1e00, 32); cpu.flags = 0x202n;
+  cpu.step();
+  assert.equal(cpu.ip, 0x750);
+  assert.equal(cpu.getRegister(0, 32), 0x11n);
+  assert.equal(cpu.getRegister(4, 32), 0x1f00n);
+  assert.equal(cpu.systemTables.task.selector, 0x30);
+  assert.equal(cpu.systemTables.task.busy, true);
+  assert.equal(memory.read(gdtBase + 6 * 8 + 5, 1)[0] & 0x0f, 0x0b);
+  assert.equal(memory.read(gdtBase + 5 * 8 + 5, 1)[0] & 0x0f, 0x09);
+  const saved = oldTss.getTaskState();
+  assert.equal(saved.eip, 0x707);
+  assert.equal(saved.registers.eax, 0xaabb);
+  assert.equal(saved.registers.esp, 0x1e00);
+});
+
+test("rejects a busy target TSS without saving or switching the current task", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x700 });
+  const gdtBase = 0x100;
+  memory.write(gdtBase + 5 * 8, Uint8Array.from([0x67,0,0,5,0,0x8b,0,0]));
+  memory.write(gdtBase + 6 * 8, Uint8Array.from([0x67,0,0,6,0,0x8b,0,0]));
+  cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
+  cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
+  cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  memory.write(0x700, Uint8Array.of(0xea, 0x00, 0x08, 0x00, 0x00, 0x30, 0x00));
+  const before = memory.read(0x500 + 32, 66);
+  assert.throws(() => cpu.step(), /Unsupported system descriptor type/);
+  assert.deepEqual(memory.read(0x500 + 32, 66), before);
+  assert.equal(cpu.systemTables.task.selector, 0x28);
+});
