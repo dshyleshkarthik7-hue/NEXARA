@@ -46,7 +46,7 @@ if (executionBackend === "microvm") {
     || typeof adapter.resolveBaseDevice !== "function"
     || typeof adapter.authenticateRequest !== "function"
     || typeof adapter.authorizeVmRequest !== "function") {
-    throw new Error("MicroVM adapter must export resolveImage, resolveBaseDevice and authenticateRequest");
+    throw new Error("MicroVM adapter must export resolveImage, resolveBaseDevice, authenticateRequest and authorizeVmRequest");
   }
   const networkProvider = new LinuxNetworkProvider({
     ipPath: process.env.NEXARA_IP_PATH || "/usr/sbin/ip",
