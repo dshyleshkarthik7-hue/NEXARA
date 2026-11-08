@@ -17,8 +17,6 @@ for app in sh mount mkdir sleep sync poweroff cat; do
   "$busybox" --list | grep -qx "$app" || fail "BusyBox is missing required applet: $app"
   ln -s busybox "$root/bin/$app"
 done
-"$busybox" --list | grep -qx nc || fail "BusyBox is missing required applet: nc (egress probe is mandatory)"
-ln -s busybox "$root/bin/nc"
 cat > "$root/init" <<'INIT'
 #!/bin/sh
 export PATH=/bin
