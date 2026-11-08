@@ -10,6 +10,7 @@ import path from "node:path";
 export class DurableRecoveryJournal {
   #directory;
   #ready;
+  #recoveryPromise = null;
 
   constructor({ directory } = {}) {
     if (typeof directory !== "string" || !path.isAbsolute(directory)) {
@@ -105,15 +106,43 @@ export class DurableRecoveryJournal {
   /** Replay queued disks after host restart; failed imports remain queued. */
   async recoverPending(resolveDevice) {
     if (typeof resolveDevice !== "function") throw new TypeError("A trusted VM disk resolver is required");
-    const results = [];
-    for (const record of await this.list()) {
-      const device = await resolveDevice(record.vmId);
-      if (!device || typeof device.importRaw !== "function") throw new Error("No trusted COW device for pending VM " + record.vmId);
-      const imported = await device.importRaw(record.diskPath);
-      await this.remove(record.id);
-      results.push(Object.freeze({ vmId: record.vmId, imported }));
+    if (this.#recoveryPromise) return this.#recoveryPromise;
+    this.#recoveryPromise = (async () => {
+      await this.#ready;
+      // O_EXCL provides a cross-process replay lease. A second host worker must
+      // not import/remove the same journal entries concurrently.
+      const lockPath = path.join(this.#directory, ".recovery.lock");
+      let lock;
+      try {
+        lock = await open(lockPath, "wx", 0o600);
+      } catch (error) {
+        if (error.code === "EEXIST") throw new Error("Durable recovery is already running for this journal");
+        throw error;
+      }
+      try {
+        await lock.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }) + "\\n");
+        await lock.sync();
+        const results = [];
+        for (const record of await this.list()) {
+          const device = await resolveDevice(record.vmId);
+          if (!device || typeof device.importRaw !== "function") throw new Error("No trusted COW device for pending VM " + record.vmId);
+          const imported = await device.importRaw(record.diskPath);
+          await this.remove(record.id);
+          results.push(Object.freeze({ vmId: record.vmId, imported }));
+        }
+        return results;
+      } finally {
+        await lock.close();
+        await unlink(lockPath).catch(error => { if (error.code !== "ENOENT") throw error; });
+        const dir = await open(this.#directory, "r");
+        try { await dir.sync(); } finally { await dir.close(); }
+      }
+    })();
+    try {
+      return await this.#recoveryPromise;
+    } finally {
+      this.#recoveryPromise = null;
     }
-    return results;
   }
 }
 
