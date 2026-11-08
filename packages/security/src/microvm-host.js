@@ -63,10 +63,10 @@ export async function createMicroVmHost({
       supervisor, registry, journal, driver,
       recovered,
       async close() {
-        const results = await Promise.allSettled([supervisor.close()]);
+        // Keep disk handles open if VM shutdown/write-back fails so the host
+        // can retry persistence instead of closing the only recovery device.
+        await supervisor.close();
         await registry.close();
-        const failure = results.find(result => result.status === "rejected");
-        if (failure) throw failure.reason;
       }
     });
   } catch (error) {
