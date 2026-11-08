@@ -2,7 +2,7 @@
 # Validate evidence collected from two real Firecracker guest boots.
 set -Eeuo pipefail
 fail(){ echo "GUEST EVIDENCE FAILED: $*" >&2; exit 1; }
-[[ $# -eq 3 ]] || fail "usage: $0 first-boot.serial.log second-boot.serial.log nft-drop-counter-before nft-drop-counter-after"
+[[ $# -eq 4 ]] || fail "usage: $0 first-boot.serial.log second-boot.serial.log nft-drop-counter-before nft-drop-counter-after"
 first="$1"; second="$2"; before="$3"; after="$4"
 [[ -f "$first" && ! -L "$first" && -s "$first" ]] || fail "first boot serial log missing/empty"
 [[ -f "$second" && ! -L "$second" && -s "$second" ]] || fail "second boot serial log missing/empty"
