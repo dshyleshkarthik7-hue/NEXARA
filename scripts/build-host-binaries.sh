@@ -30,9 +30,12 @@ make -C "$BB_SRC" distclean
 make -C "$BB_SRC" defconfig
 "$BB_SRC/scripts/config" --file "$BB_SRC/.config" --enable STATIC
 make -C "$BB_SRC" olddefconfig
-make -C "$BB_SRC" -j"$(nproc)"
+make -C "$BB_SRC" CC=musl-gcc -j"$(nproc)"
 install -m 0755 "$BB_SRC/busybox" "$OUT/busybox"
-"$OUT/busybox" --help >/dev/null 2>&1 || true
+"$OUT/busybox" --list | grep -qx nc || fail "static BusyBox build lacks nc applet"
+if readelf -l "$OUT/busybox" | grep -q INTERP; then fail "BusyBox unexpectedly has a dynamic interpreter"; fi
+"$OUT/firecracker" --version
+"$OUT/jailer" --version
 file "$OUT/firecracker" "$OUT/jailer" "$OUT/busybox" 2>/dev/null || true
 (
   cd "$OUT"
