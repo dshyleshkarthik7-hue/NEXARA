@@ -248,8 +248,10 @@ test("32-bit IDT task gate switches tasks and records backlink", () => {
     segments: { es: 0x10, cs: 0x08, ss: 0x10, ds: 0x10, fs: 0x10, gs: 0x10, ldt: 0 } });
   const gate = idtBase + 32 * 8;
   memory.write(gate, Uint8Array.of(0, 0, 0x30, 0, 0, 0x85, 0, 0));
-  cpu.deliverException(32, { returnIp: 0x704 });
+  cpu.deliverException(32, { returnIp: 0x704, errorCode: 0x55 });
   assert.equal(cpu.ip, 0x750);
+  assert.equal(cpu.getRegister(4, 32), 0x1efcn);
+  assert.equal(new DataView(memory.read(0x1efc, 4).buffer).getUint32(0, true), 0x55);
   assert.equal(cpu.systemTables.task.selector, 0x30);
   assert.equal(target.backlink, 0x28);
   assert.equal((cpu.flags & (1n << 14n)) !== 0n, true);
