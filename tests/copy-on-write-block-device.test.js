@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, chmod } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -99,4 +99,25 @@ test("copy-on-write disk works through the lease capability broker", async t => 
   assert.equal((await broker.readBlockDevice({ lba: 3, device: overlay }))[0], 0x11);
   await overlay.close();
   await immutableBase.close();
+});
+
+test("copy-on-write disk rejects overlay files with permissive modes", async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "nexara-cow-mode-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const base = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 2 });
+  const baseBytes = new Uint8Array(1024);
+  await base.close();
+  const readOnly = await FileBlockDevice.open({
+    directory, vmId: "ba5e1234-1234-1234", sectors: 2, readOnly: true, create: false
+  });
+  const vmId = "12345678-1234-4234-8234-123456789abc";
+  const overlay = await CopyOnWriteBlockDevice.open({
+    directory, vmId, sectors: 2, baseDigest: digestOf(baseBytes), baseDevice: readOnly
+  });
+  await overlay.close();
+  await chmod(path.join(directory, vmId + ".overlay"), 0o644);
+  await assert.rejects(() => CopyOnWriteBlockDevice.open({
+    directory, vmId, sectors: 2, baseDigest: digestOf(baseBytes), baseDevice: readOnly, create: false
+  }), /private regular file/);
+  await readOnly.close();
 });
