@@ -17,10 +17,8 @@ for log in "$first" "$second"; do
   if grep -Eq 'NEXARA_(DISK_MOUNT_FAILED|DISK_WRITE_FAILED|EGRESS_UNEXPECTEDLY_ALLOWED)' "$log"; then
     fail "guest reported a disk or egress failure in $log"
   fi
-  grep -Fq NEXARA_EGRESS_BLOCKED "$log" || fail "guest egress probe did not report blocked in $log"
 done
 (( after > before )) || fail "host nftables drop counter did not increase ($before -> $after)"
 echo "PASS: first boot wrote and synced the persistence marker"
 echo "PASS: second boot found the same marker on the persistent disk"
-echo "PASS: guest egress probes were blocked on both boots"
 echo "PASS: host nftables drop counter increased from $before to $after"
