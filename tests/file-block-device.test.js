@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { FileBlockDevice } from "../packages/runtime/src/index.js";
+import { FileBlockDevice } from "../packages/runtime/src/file-block-device.js";
 
 test("file block devices persist bounded sector writes across reopen", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "nexara-disk-"));
