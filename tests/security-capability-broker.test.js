@@ -10,7 +10,7 @@ function setup({ capabilities = ["storage-read", "storage-write", "network-egres
   const authority = new VmLeaseAuthority(secret);
   const envelope = authority.issue({
     subject: "tenant-a", imageDigest: digest, capabilities, egress,
-    quotas: { diskMiB: 1 }
+    quotas: { diskMiB: 16 }
   }, { now });
   let current = now + 10;
   return { broker: new VmCapabilityBroker({
@@ -25,7 +25,7 @@ test("broker authorizes bounded storage reads and validates adapter results", as
   });
   assert.equal(result.byteLength, 1024);
   assert.equal(result[0], 1);
-  await assert.rejects(() => broker.readStorage({ lba: 2048, count: 1, read: () => new Uint8Array(512) }), /quota/);
+  await assert.rejects(() => broker.readStorage({ lba: 32768, count: 1, read: () => new Uint8Array(512) }), /quota/);
   await assert.rejects(() => broker.readStorage({ lba: 0, read: () => new Uint8Array(1) }), /invalid sector buffer/);
 });
 
@@ -42,7 +42,7 @@ test("broker validates write ranges and sector-aligned data", async () => {
   const { broker } = setup();
   let writes = 0;
   await assert.rejects(() => broker.writeStorage({ lba: 0, data: new Uint8Array(513), write: () => { writes++; } }), /whole 512-byte/);
-  await assert.rejects(() => broker.writeStorage({ lba: 2048, data: new Uint8Array(512), write: () => { writes++; } }), /quota/);
+  await assert.rejects(() => broker.writeStorage({ lba: 32768, data: new Uint8Array(512), write: () => { writes++; } }), /quota/);
   assert.equal(writes, 0);
   await broker.writeStorage({ lba: 3, data: new Uint8Array(512), write: async () => { writes++; } });
   assert.equal(writes, 1);
