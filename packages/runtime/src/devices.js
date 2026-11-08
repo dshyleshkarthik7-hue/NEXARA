@@ -286,13 +286,22 @@ export class PcAtInterruptFabric {
   }
 
   snapshot() {
-    return Object.freeze({ format: "nexara-pcat-fabric-v1", pic: this.pic.snapshot(), pit: this.pit.snapshot() });
+    return Object.freeze({
+      format: "nexara-pcat-fabric-v1",
+      pic: this.pic.snapshot(),
+      pit: this.pit.snapshot(),
+      ata: this.ata?.snapshot() ?? null
+    });
   }
 
   restore(state) {
-    if (!state || state.format !== "nexara-pcat-fabric-v1") throw new TypeError("Invalid PC fabric snapshot");
+    if (!state || state.format !== "nexara-pcat-fabric-v1"
+      || (this.ata && !state.ata) || (!this.ata && state.ata != null)) {
+      throw new TypeError("Invalid PC fabric snapshot or device configuration mismatch");
+    }
     this.pic.restore(state.pic);
     this.pit.restore(state.pit);
+    if (this.ata) this.ata.restore(state.ata);
     return this.snapshot();
   }
 }
