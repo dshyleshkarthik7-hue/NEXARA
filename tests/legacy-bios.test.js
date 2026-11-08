@@ -154,7 +154,7 @@ test("INT 13h EDD check and AH=42 extended LBA read use the disk-address packet"
 
 test("INT 16h keyboard services poll, peek and consume queued key words", () => {
   const disk = new MemoryBlockDevice({ sectors: 1 });
-  const { cpu, bios } = makeBiosCpu({ disk });
+  const { cpu, bios } = makeBiosCpu({ disk, code: [0xcd,0x16,0xf4] });
   cpu.ax = 0x0100;
   cpu.step();
   assert.equal(cpu.flags & 0x40, 0x40);
@@ -178,7 +178,7 @@ test("INT 16h keyboard services poll, peek and consume queued key words", () => 
 
 test("INT 1Ah returns deterministic BIOS ticks and reports midnight rollover", () => {
   const disk = new MemoryBlockDevice({ sectors: 1 });
-  const { cpu, bios } = makeBiosCpu({ disk });
+  const { cpu, bios } = makeBiosCpu({ disk, code: [0xcd,0x1a,0xf4] });
   bios.advanceTicks(0x1800af - 100);
   cpu.ax = 0x0000;
   cpu.step();
