@@ -37,7 +37,7 @@ export class LinuxNetworkProvider {
       await this.#run(this.#ip, ["netns", "add", name]);
       created = true;
       await this.#run(this.#ip, ["-n", name, "link", "set", "lo", "up"]);
-      await this.#run(this.#ip, ["-n", name, "tuntap", "add", "dev", tapName, "mode", "tap", "user", String(uid)]);
+      await this.#run(this.#ip, ["-n", name, "tuntap", "add", "dev", tapName, "mode", "tap", "user", String(uid), "group", String(gid)]);
       await this.#run(this.#ip, ["-n", name, "link", "set", tapName, "up"]);
       const rules = [
         "table inet nexara {",
@@ -62,8 +62,8 @@ export class LinuxNetworkProvider {
       id, name, tapName, netnsPath,
       release: async () => {
         if (released) return;
-        released = true;
         await this.#run(this.#ip, ["netns", "del", name]);
+        released = true;
       }
     });
   }
