@@ -53,7 +53,10 @@ export class LegacyBios {
     const sector = cpu.cx & 0x3f;
     const cylinder = ((cpu.cx >>> 8) & 0xff) | ((cpu.cx & 0xc0) << 2);
     const head = (cpu.dx >>> 8) & 0xff;
-    if (requestedDrive !== this.drive) return this.#status(cpu, 1), true;
+    if (requestedDrive !== this.drive) {
+      this.#status(cpu, 1);
+      return true;
+    }
     if (count < 1 || count > 128 || sector < 1 || sector > this.sectorsPerTrack
       || count > this.sectorsPerTrack - sector + 1 || head >= this.heads || cylinder > 1023) {
       this.#status(cpu, 4);
