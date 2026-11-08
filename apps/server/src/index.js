@@ -130,7 +130,8 @@ if (executionBackend === "microvm") {
       // Never sign client-selected privileges. The trusted deployment adapter
       // must authorize the requested image and return the complete lease policy.
       const policy = await microVmAdapter.authorizeVmRequest({ identity, request: body });
-      if (!policy || typeof policy.imageDigest !== "string") {
+      if (!policy || typeof policy.imageDigest !== "string"
+        || typeof policy.workloadKey !== "string" || !policy.workloadKey) {
         return reply.code(403).send({ error: "VM request is not authorized" });
       }
       const envelope = vmAuthority.issue({
@@ -142,7 +143,8 @@ if (executionBackend === "microvm") {
         ttlMs: policy.ttlMs
       });
       const vm = await microVmHost.supervisor.create({
-        envelope, subject: identity.subject, imageDigest: policy.imageDigest
+        envelope, subject: identity.subject, imageDigest: policy.imageDigest,
+        workloadKey: policy.workloadKey
       });
       return reply.code(201).send(vm);
     } catch (error) {
