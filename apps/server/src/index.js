@@ -30,6 +30,7 @@ const maxSessions = Math.max(1, Number.parseInt(process.env.NEXARA_MAX_SESSIONS 
 const executionBackend = process.env.NEXARA_EXECUTION_BACKEND || "pty";
 let microVmHost = null;
 let microVmAuth = null;
+let microVmAdapter = null;
 let vmAuthority = null;
 if (executionBackend === "microvm") {
   if (process.platform !== "linux") throw new Error("The microVM backend requires Linux");
@@ -61,6 +62,7 @@ if (executionBackend === "microvm") {
     parentCgroup: process.env.NEXARA_PARENT_CGROUP || "nexara",
     networkProvider
   });
+  microVmAdapter = adapter;
   vmAuthority = new VmLeaseAuthority(secret);
   microVmAuth = adapter.authenticateRequest;
   microVmHost = await createMicroVmHost({
@@ -127,7 +129,7 @@ if (executionBackend === "microvm") {
       const body = request.body || {};
       // Never sign client-selected privileges. The trusted deployment adapter
       // must authorize the requested image and return the complete lease policy.
-      const policy = await adapter.authorizeVmRequest({ identity, request: body });
+      const policy = await microVmAdapter.authorizeVmRequest({ identity, request: body });
       if (!policy || typeof policy.imageDigest !== "string") {
         return reply.code(403).send({ error: "VM request is not authorized" });
       }
