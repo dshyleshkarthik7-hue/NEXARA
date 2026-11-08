@@ -15,10 +15,12 @@ function asU64(value, name) {
  * perform privilege transitions or deliver interrupts.
  */
 export class X86DescriptorTable {
-  constructor(memory, { base = 0n, limit = 0xffff, kind = "gdt", longMode = true } = {}) {
+  constructor(memory, { base = 0n, limit = 0xffff, kind = "gdt", longMode = true, paging = null } = {}) {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
     if (!["gdt", "ldt", "idt"].includes(kind)) throw new RangeError("kind must be gdt, ldt, or idt");
     this.memory = memory;
+    if (paging !== null && (!paging || paging.memory !== memory || typeof paging.translate !== "function")) throw new TypeError("paging must use the descriptor table guest memory");
+    this.paging = paging;
     this.kind = kind;
     this.longMode = Boolean(longMode);
     this.setRegister(base, limit);
@@ -29,9 +31,8 @@ export class X86DescriptorTable {
     if (!Number.isInteger(limit) || limit < 0 || limit > 0xffff) {
       throw new RangeError("Descriptor-table limit must be a 16-bit unsigned integer");
     }
-    if (nextBase + BigInt(limit) >= BigInt(this.memory.byteLength)) {
-      throw new RangeError("Descriptor table exceeds guest physical memory");
-    }
+    if (nextBase + BigInt(limit) > 0xffffffffn && !this.longMode) throw new RangeError("32-bit descriptor table exceeds linear address space");
+    if (!this.paging && nextBase + BigInt(limit) >= BigInt(this.memory.byteLength)) throw new RangeError("Descriptor table exceeds guest physical memory");
     this.base = nextBase;
     this.limit = limit;
     return Object.freeze({ base: this.base, limit: this.limit });
@@ -42,10 +43,20 @@ export class X86DescriptorTable {
       throw new RangeError("Descriptor exceeds table limit");
     }
     const address = this.base + BigInt(offset);
-    if (address + BigInt(length) > BigInt(this.memory.byteLength)) {
-      throw new RangeError("Descriptor exceeds guest physical memory");
+    if (!this.paging) {
+      if (address + BigInt(length) > BigInt(this.memory.byteLength)) throw new RangeError("Descriptor exceeds guest physical memory");
+      return this.memory.read(Number(address), length);
     }
-    return this.memory.read(Number(address), length);
+    const output = new Uint8Array(length);
+    let copied = 0;
+    while (copied < length) {
+      const linear = address + BigInt(copied);
+      const physical = this.paging.translate(linear, { user: false });
+      const count = Math.min(length - copied, 4096 - Number(linear & 0xfffn));
+      output.set(this.memory.read(physical, count), copied);
+      copied += count;
+    }
+    return output;
   }
 
   #u16(bytes, offset) { return BigInt(bytes[offset] | (bytes[offset + 1] << 8)); }
