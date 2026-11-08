@@ -8,6 +8,11 @@ on:
       - "scripts/build-firecracker-guest-initramfs.sh"
       - "scripts/build-firecracker-test-disk.sh"
       - "scripts/verify-host-bundle.sh"
+      - "scripts/run-firecracker-two-boot.sh"
+      - "scripts/verify-two-boot-guest-evidence.sh"
+      - "scripts/verify-jailed-process.sh"
+      - "scripts/host-validation.sh"
+      - ".github/workflows/host-validation.yml"
       - ".github/workflows/build-host-binaries.yml"
       - "docs/FIRECRACKER-GUEST-IMAGE.md"
 permissions:
