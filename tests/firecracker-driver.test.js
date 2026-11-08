@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, writeFile, rm, mkdir, readFile } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, mkdir, readFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -150,6 +150,8 @@ test("Firecracker driver attaches a broker-managed copy-on-write disk as raw roo
   assert.deepEqual(calls, [staged]);
   assert.equal((await readFile(staged)).length, 2048 * 512);
   assert.equal(f.requests.find(x => x.url === "/drives/rootfs").body.path_on_host, "/nexara/rootfs.ext4");
+  assert.equal(f.requests.find(x => x.url === "/drives/rootfs").body.is_read_only, false, "COW-backed root disks must accept guest writes");
+  assert.equal((await stat(staged)).mode & 0o777, 0o660, "jailer-owned COW image must be writable by the guest process");
   await driver.stop(handle);
   assert.equal(imported, staged, "stopped guest disk must be imported into persistent COW storage");
   await assert.rejects(() => readFile(staged), { code: "ENOENT" });
