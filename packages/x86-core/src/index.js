@@ -185,6 +185,9 @@ export class X86Cpu {
         if (reason === "jmp" || reason === "iret-task") this.legacyPaging32.translate(currentAccessAddress, { write: true, user: false });
       } else if (targetAccessAddress >= BigInt(this.memory.byteLength) || currentAccessAddress >= BigInt(this.memory.byteLength)) throw new Error("TSS descriptor access byte exceeds guest memory");
       const oldTss = new X86Tss32(this.memory, { base: current.base, limit: current.limit, paging: taskPaging });
+      // Validate every guest-memory write before changing the outgoing task image.
+      oldTss.preflightWrite(32, 66);
+      if (reason === "task-gate" || reason === "call") targetTss.preflightWrite(0, 2);
       oldTss.setTaskState({
         eip: returnIp, eflags: Number(this.flags & 0xffffffffn),
         registers: { eax: Number(this.getRegister(0, 32)), ecx: Number(this.getRegister(1, 32)), edx: Number(this.getRegister(2, 32)), ebx: Number(this.getRegister(3, 32)),
@@ -792,7 +795,7 @@ export class X86Cpu {
         if (!current.usable || !current.present || !current.busy || current.limit < 0x67) {
           throw new Error("Nested-task IRET requires a present busy current TSS");
         }
-        const currentTss = new X86Tss32(this.memory, { base: current.base, limit: current.limit });
+        const currentTss = new X86Tss32(this.memory, { base: current.base, limit: current.limit, paging: (this.controlRegisters.get(0) & (1n << 31n)) !== 0n ? this.legacyPaging32 : null });
         const backlink = currentTss.backlink;
         if (backlink === 0) throw new Error("Nested-task IRET requires a non-null TSS backlink");
         return this.switchTask(backlink, { reason: "iret-task", returnIp: this.ip });
