@@ -1470,3 +1470,4 @@ export class X86Cpu {
   }
 }
 export { X86RealModeCpu } from "./real-mode.js";
+export { LegacyBios } from "./legacy-bios.js";
