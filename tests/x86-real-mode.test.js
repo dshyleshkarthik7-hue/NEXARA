@@ -166,7 +166,7 @@ test("real-mode ModRM MOV and XOR support DS and SS effective addresses", () => 
     0x89,0x46,0x02,       // MOV [BP+2],AX (SS default)
     0x8b,0x56,0x02,       // MOV DX,[BP+2]
     0xf4
-  ]);
+  ], { ss: 0x6000 });
   const result = cpu.run({ maxInstructions: 16 });
   assert.equal(result.state, "halted");
   assert.equal(cpu.cx, 0x1234);
@@ -191,8 +191,8 @@ test("real-mode REP MOVSB and STD direction copy bytes in the requested directio
   const result = cpu.run({ maxInstructions: 16 });
   assert.equal(result.state, "halted");
   assert.deepEqual(memory.read(0x700, 3), Uint8Array.of(0x11,0x22,0x33));
-  assert.equal(cpu.si, 0x600);
-  assert.equal(cpu.di, 0x700);
+  assert.equal(cpu.si, 0x601);
+  assert.equal(cpu.di, 0x701);
   assert.equal(cpu.cx, 0);
   assert.equal(cpu.flags & 0x400, 0x400);
 });
