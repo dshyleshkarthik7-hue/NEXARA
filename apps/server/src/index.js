@@ -44,7 +44,8 @@ if (executionBackend === "microvm") {
     : adapterModule.default;
   if (!adapter || typeof adapter.resolveImage !== "function"
     || typeof adapter.resolveBaseDevice !== "function"
-    || typeof adapter.authenticateRequest !== "function") {
+    || typeof adapter.authenticateRequest !== "function"
+    || typeof adapter.authorizeVmRequest !== "function") {
     throw new Error("MicroVM adapter must export resolveImage, resolveBaseDevice and authenticateRequest");
   }
   const networkProvider = new LinuxNetworkProvider({
@@ -124,15 +125,22 @@ if (executionBackend === "microvm") {
     }
     try {
       const body = request.body || {};
+      // Never sign client-selected privileges. The trusted deployment adapter
+      // must authorize the requested image and return the complete lease policy.
+      const policy = await adapter.authorizeVmRequest({ identity, request: body });
+      if (!policy || typeof policy.imageDigest !== "string") {
+        return reply.code(403).send({ error: "VM request is not authorized" });
+      }
       const envelope = vmAuthority.issue({
         subject: identity.subject,
-        imageDigest: body.imageDigest,
-        quotas: body.quotas,
-        capabilities: body.capabilities,
-        egress: body.egress
+        imageDigest: policy.imageDigest,
+        quotas: policy.quotas,
+        capabilities: policy.capabilities,
+        egress: policy.egress,
+        ttlMs: policy.ttlMs
       });
       const vm = await microVmHost.supervisor.create({
-        envelope, subject: identity.subject, imageDigest: body.imageDigest
+        envelope, subject: identity.subject, imageDigest: policy.imageDigest
       });
       return reply.code(201).send(vm);
     } catch (error) {
