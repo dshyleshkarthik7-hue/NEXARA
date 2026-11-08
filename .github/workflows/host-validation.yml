@@ -1,0 +1,26 @@
+name: NEXARA Linux host validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-validation:
+    # Configure a dedicated, ephemeral self-hosted runner with these labels.
+    # Never run this privileged job on pull requests or untrusted branches.
+    runs-on: [self-hosted, linux, x64, kvm, nexara-host-validation]
+    timeout-minutes: 15
+    steps:
+      - name: Check out trusted main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Validate KVM, cgroup v2, seccomp and default-deny network namespace
+        env:
+          FIRECRACKER_BIN: ${{ vars.FIRECRACKER_BIN }}
+          JAILER_BIN: ${{ vars.JAILER_BIN }}
+        run: |
+          sudo -E env FIRECRACKER_BIN="$FIRECRACKER_BIN" JAILER_BIN="$JAILER_BIN" bash scripts/host-validation.sh
