@@ -374,9 +374,9 @@ test("task-switch commit failure restores CPU state, TSS images and descriptor b
   const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
   const cpu = new X86Cpu({ memory, mode: 32, instructionPointer: 0x700 });
   const gdtBase = 0x100;
-  const putDescriptor = (index, access, base) => memory.write(gdtBase + index * 8,
-    Uint8Array.from([0x67,0,base & 255,(base >>> 8) & 255,(base >>> 16) & 255,access,0,(base >>> 24) & 255]));
-  putDescriptor(1, 0x9a, 0); putDescriptor(2, 0x92, 0);
+  const putDescriptor = (index, access, base, limit = 0x67, flags = 0) => memory.write(gdtBase + index * 8,
+    Uint8Array.from([limit & 255,(limit >>> 8) & 255,base & 255,(base >>> 8) & 255,(base >>> 16) & 255,access,((limit >>> 16) & 0x0f) | flags,(base >>> 24) & 255]));
+  putDescriptor(1, 0x9a, 0, 0xfffff, 0xc0); putDescriptor(2, 0x92, 0, 0xfffff, 0xc0);
   putDescriptor(5, 0x8b, 0x500); // current busy TSS
   putDescriptor(6, 0x89, 0x600); // target available TSS
   cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
