@@ -211,3 +211,30 @@ test("Firecracker shutdown journals failed write-back outside the jail", async t
   assert.equal((await journal.list()).length, 1);
   await assert.rejects(() => readFile(staged), { code: "ENOENT" });
 });
+
+test("Firecracker driver verifies, stages and configures a digest-pinned initramfs", async t => {
+  const f = await fixture(t);
+  const initrdPath = path.join(f.directory, "initramfs.cpio.gz");
+  const initrdBytes = Buffer.from("test-initramfs");
+  await writeFile(initrdPath, initrdBytes);
+  const driver = new FirecrackerDriver({
+    provider: f.provider,
+    resolveImage: async imageDigest => ({ ...(await f.resolveImage(imageDigest)), initrdPath, initrdDigest: digest(initrdBytes) })
+  });
+  await driver.launch(config);
+  const boot = f.requests.find(x => x.url === "/boot-source").body;
+  assert.equal(boot.initrd_path, "/nexara/initramfs.cpio.gz");
+  assert.match(boot.boot_args, /rdinit=\\/init/);
+  assert.equal((await readFile(path.join(f.jailRoot, "nexara", "initramfs.cpio.gz"))).toString(), "test-initramfs");
+});
+
+test("Firecracker driver rejects an initramfs digest mismatch before starting host", async t => {
+  const f = await fixture(t);
+  let starts = 0;
+  const driver = new FirecrackerDriver({
+    provider: { start: async () => { starts++; }, stop: async () => {} },
+    resolveImage: async imageDigest => ({ ...(await f.resolveImage(imageDigest)), initrdPath: f.rootfs, initrdDigest: "sha256:" + "0".repeat(64) })
+  });
+  await assert.rejects(() => driver.launch(config), /digest mismatch/);
+  assert.equal(starts, 0);
+});
