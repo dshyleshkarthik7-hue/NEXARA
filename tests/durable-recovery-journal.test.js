@@ -53,3 +53,25 @@ test("durable recovery journal rejects tampered disk contents before import", as
   })), /integrity check failed/);
   assert.equal(imports, 0);
 });
+
+
+test("durable recovery journal excludes concurrent replay workers", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexara-recovery-lock-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const source = path.join(root, "guest.raw");
+  await writeFile(source, Buffer.alloc(512, 0x41), { mode: 0o600 });
+  const journal = new DurableRecoveryJournal({ directory: path.join(root, "journal") });
+  await journal.save({ vmId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", sourcePath: source });
+  let release;
+  let entered;
+  const enteredPromise = new Promise(resolve => { entered = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const first = journal.recoverPending(async () => ({
+    importRaw: async () => { entered(); await blocked; return { changedSectors: 1 }; }
+  }));
+  await enteredPromise;
+  await assert.rejects(() => journal.recoverPending(async () => ({ importRaw: async () => ({}) })), /already running/);
+  release();
+  await first;
+  assert.equal((await journal.list()).length, 0);
+});
