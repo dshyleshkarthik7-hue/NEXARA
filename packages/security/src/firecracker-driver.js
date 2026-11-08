@@ -40,7 +40,7 @@ export class FirecrackerDriver {
     }
     if (config.rootfsDevice !== undefined) {
       const disk = config.rootfsDevice;
-      if (!disk || typeof disk.materializeRaw !== "function" || !Number.isSafeInteger(disk.sectors)
+      if (!disk || typeof disk.materializeRaw !== "function" || typeof disk.importRaw !== "function" || !Number.isSafeInteger(disk.sectors)
         || disk.sectors < 1 || !Number.isSafeInteger(config.quotas.diskMiB)
         || disk.sectors * 512 > config.quotas.diskMiB * 1024 * 1024) {
         throw new TypeError("Invalid broker-managed root disk or disk quota");
@@ -142,6 +142,7 @@ export class FirecrackerDriver {
 
   async stop(handle) {
     if (!handle || !handle.host) throw new TypeError("Invalid Firecracker instance handle");
+    if (handle.stopped) return;
     try {
       if (handle.started) {
         await apiRequest(handle.host.socketPath, "PUT", "/actions", {
@@ -149,14 +150,18 @@ export class FirecrackerDriver {
         }, this.#timeoutMs).catch(() => {});
       }
     } finally {
-      await this.#provider.stop(handle.host);
-      if (handle.materializedRootfs && handle.rootfsDevice) {
-        // Firecracker must be stopped before importing its final raw disk state.
-        await chmod(handle.materializedRootfs, 0o600);
-        await handle.rootfsDevice.importRaw(handle.materializedRootfs);
+      try {
+        await this.#provider.stop(handle.host);
+        if (handle.materializedRootfs && handle.rootfsDevice) {
+          // Firecracker must be stopped before importing its final raw disk state.
+          await chmod(handle.materializedRootfs, 0o600);
+          await handle.rootfsDevice.importRaw(handle.materializedRootfs);
+        }
+      } finally {
+        if (handle.materializedRootfs) await unlink(handle.materializedRootfs).catch(() => {});
+        handle.started = false;
+        handle.stopped = true;
       }
-      if (handle.materializedRootfs) await unlink(handle.materializedRootfs).catch(() => {});
-      handle.started = false;
     }
   }
 }
