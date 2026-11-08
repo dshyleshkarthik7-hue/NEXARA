@@ -102,15 +102,15 @@ export class FirecrackerDriver {
         is_root_device: true,
         is_read_only: manifest.readOnlyRootfs === true
       }, this.#timeoutMs);
-      if (manifest.networkInterface) {
-        if (typeof manifest.networkInterface.hostDevName !== "string"
-          || !/^[a-zA-Z0-9_.-]{1,15}$/.test(manifest.networkInterface.hostDevName)) {
+      const tapName = host.network?.tapName ?? manifest.networkInterface?.hostDevName;
+      if (tapName !== undefined) {
+        if (typeof tapName !== "string" || !/^[a-zA-Z0-9_.-]{1,15}$/.test(tapName)) {
           throw new Error("Invalid pre-provisioned TAP interface name");
         }
         await apiRequest(host.socketPath, "PUT", "/network-interfaces/eth0", {
           iface_id: "eth0",
-          host_dev_name: manifest.networkInterface.hostDevName,
-          guest_mac: manifest.networkInterface.guestMac ?? "06:00:ac:10:00:02"
+          host_dev_name: tapName,
+          guest_mac: manifest.networkInterface?.guestMac ?? "06:00:ac:10:00:02"
         }, this.#timeoutMs);
       }
       await apiRequest(host.socketPath, "PUT", "/actions", { action_type: "InstanceStart" }, this.#timeoutMs);
