@@ -217,6 +217,9 @@ test("far CALL to an available TSS sets backlink and nested-task state", () => {
   cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
   cpu.systemTables.loadTaskRegister({ selector: 0x28, base: 0x500, limit: 0x67, present: true, busy: true, usable: true });
   cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
+  cpu.segments.installCodeSegment(0x08);
+  cpu.segments.loadStack(0x10);
+  cpu.segments.loadData("ds", 0x10);
   const target = new X86Tss32(memory, { base: 0x600, limit: 0x67 });
   target.setTaskState({ eip: 0x750, eflags: 0x202,
     registers: { eax: 1, ecx: 2, edx: 3, ebx: 4, esp: 0x1f00, ebp: 6, esi: 7, edi: 8 },
