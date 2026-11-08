@@ -62,7 +62,8 @@ test("legacy boot loader validates disk LBA, BIOS drive and guest memory window"
 test("staged legacy boot sector executes through the 16-bit real-mode interpreter", () => {
   const disk = new MemoryBlockDevice({ sectors: 1 });
   const sector = new Uint8Array(512);
-  sector.set([0xb8, 0x34, 0x12, 0xf4]); // MOV AX,1234h; HLT
+  // Assembled 16-bit boot stub: MOV AX,1234h; MOV [0500h],AX; HLT.
+  sector.set([0xb8,0x34,0x12,0xa3,0x00,0x05,0xf4]);
   sector[510] = 0x55;
   sector[511] = 0xaa;
   disk.writeSectors(0, sector);
@@ -72,5 +73,6 @@ test("staged legacy boot sector executes through the 16-bit real-mode interprete
   const result = cpu.run({ maxInstructions: 8 });
   assert.equal(result.state, "halted");
   assert.equal(cpu.ax, 0x1234);
-  assert.equal(result.instructionsExecuted, 2);
+  assert.deepEqual(memory.read(0x500, 2), Uint8Array.of(0x34, 0x12));
+  assert.equal(result.instructionsExecuted, 3);
 });
