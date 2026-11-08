@@ -144,7 +144,7 @@ test("Firecracker driver attaches a broker-managed copy-on-write disk as raw roo
     },
     importRaw: async source => { imported = source; return { changedSectors: 1 }; }
   };
-  const driver = new FirecrackerDriver({ provider: f.provider, resolveImage: f.resolveImage });
+  const driver = new FirecrackerDriver({ provider: f.provider, resolveImage: async imageDigest => ({ ...(await f.resolveImage(imageDigest)), readOnlyRootfs: true }) });
   const handle = await driver.launch({ ...config, rootfsDevice });
   const staged = path.join(f.jailRoot, "nexara", "rootfs.ext4");
   assert.deepEqual(calls, [staged]);
