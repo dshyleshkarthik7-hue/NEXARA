@@ -40,3 +40,32 @@ test("rejects invalid privilege rings and out-of-range stack fields", () => {
   assert.throws(() => tss.setRingStack(0, { esp: -1, ss: 0x10 }), /32-bit/);
   assert.throws(() => tss.setRingStack(0, { esp: 0x1000, ss: 0x10000 }), /16-bit/);
 });
+
+test("reads and writes the 32-bit hardware task backlink and saved register image", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const tss = new X86Tss32(memory, { base: 0x200, limit: 0x67 });
+  tss.backlink = 0x28;
+  assert.equal(tss.backlink, 0x28);
+  const state = {
+    eip: 0x12345678,
+    eflags: 0x202,
+    registers: { eax: 1, ecx: 2, edx: 3, ebx: 4, esp: 0x1800, ebp: 6, esi: 7, edi: 8 },
+    segments: { es: 0x10, cs: 0x08, ss: 0x10, ds: 0x10, fs: 0, gs: 0, ldt: 0 }
+  };
+  assert.deepEqual(tss.setTaskState(state), state);
+  assert.deepEqual(tss.getTaskState(), state);
+});
+
+test("validates the entire task register image before modifying TSS memory", () => {
+  const memory = new GuestMemory({ initialPages: 2, maximumPages: 2 });
+  const tss = new X86Tss32(memory, { base: 0x200, limit: 0x67 });
+  const before = memory.read(0x200, 104);
+  const state = {
+    eip: 0x1234, eflags: 2,
+    registers: { eax: 1, ecx: 2, edx: 3, ebx: 4, esp: 5, ebp: 6, esi: 7, edi: 8 },
+    segments: { es: 0x10, cs: 0x08, ss: 0x10, ds: 0x10, fs: 0, gs: 0, ldt: 0x10000 }
+  };
+  assert.throws(() => tss.setTaskState(state), /16-bit/);
+  assert.deepEqual(memory.read(0x200, 104), before);
+  assert.throws(() => tss.setTaskState({ ...state, eip: -1 }), /32-bit/);
+});
