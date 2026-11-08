@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -17,7 +17,9 @@ async function fixture(t) {
   const rootfsBytes = Buffer.from("test-rootfs-image");
   await writeFile(kernel, kernelBytes);
   await writeFile(rootfs, rootfsBytes);
-  const socketPath = path.join(directory, "firecracker.sock");
+  const jailRoot = path.join(directory, "jail-root");
+  await mkdir(jailRoot);
+  const socketPath = path.join(jailRoot, "firecracker.socket");
   const requests = [];
   const server = http.createServer((req, res) => {
     let body = "";
@@ -30,7 +32,7 @@ async function fixture(t) {
     });
   });
   await new Promise((resolve, reject) => server.listen(socketPath, error => error ? reject(error) : resolve()));
-  const host = { socketPath, token: "host-token" };
+  const host = { socketPath, jailRoot, token: "host-token" };
   let stopped = 0;
   const provider = {
     start: async options => { assert.equal(options.requireJailer, true); assert.equal(options.requireCgroups, true); return host; },
@@ -65,6 +67,10 @@ test("Firecracker driver verifies artifacts and configures machine before starti
   ]);
   assert.equal(f.requests[0].body.vcpu_count, 2);
   assert.equal(f.requests[0].body.mem_size_mib, 512);
+  assert.equal(f.requests[1].body.kernel_image_path, "/nexara/vmlinux");
+  assert.equal(f.requests[2].body.path_on_host, "/nexara/rootfs.ext4");
+  assert.equal((await readFile(path.join(f.jailRoot, "nexara", "vmlinux"))).toString(), "test-kernel-image");
+  assert.equal((await readFile(path.join(f.jailRoot, "nexara", "rootfs.ext4"))).toString(), "test-rootfs-image");
   assert.equal(f.requests[3].body.action_type, "InstanceStart");
   await driver.stop(handle);
   assert.equal(f.stopped, 1);
