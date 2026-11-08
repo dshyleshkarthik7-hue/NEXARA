@@ -310,7 +310,7 @@ test("real-mode immediate arithmetic preserves operands for CMP and reports borr
 test("real-mode accumulator immediate ADD and SUB update byte and word registers", () => {
   const { cpu } = cpuFor([0xb0,0xff,0x04,0x01,0x2c,0x02,0x05,0x01,0x00,0xf4]);
   assert.equal(cpu.run({ maxInstructions: 8 }).state, "halted");
-  assert.equal(cpu.ax, 0x0100);
+  assert.equal(cpu.ax, 0x00ff);
   assert.equal(cpu.flags & 1, 0);
 });
 
