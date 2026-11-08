@@ -17,7 +17,8 @@ for app in sh mount mkdir sleep sync poweroff cat; do
   "$busybox" --list | grep -qx "$app" || fail "BusyBox is missing required applet: $app"
   ln -s busybox "$root/bin/$app"
 done
-if "$busybox" --list | grep -qx nc; then ln -s busybox "$root/bin/nc"; fi
+"$busybox" --list | grep -qx nc || fail "BusyBox is missing required applet: nc (egress probe is mandatory)"
+ln -s busybox "$root/bin/nc"
 cat > "$root/init" <<'INIT'
 #!/bin/sh
 export PATH=/bin
@@ -41,14 +42,10 @@ else
     echo "NEXARA_DISK_WRITE_FAILED"
   fi
 fi
-if [ -x /bin/nc ]; then
-  if nc -z -w 2 1.1.1.1 443 >/dev/null 2>&1; then
-    echo "NEXARA_EGRESS_UNEXPECTEDLY_ALLOWED"
-  else
-    echo "NEXARA_EGRESS_BLOCKED"
-  fi
+if nc -z -w 3 1.1.1.1 443 >/dev/null 2>&1; then
+  echo "NEXARA_EGRESS_UNEXPECTEDLY_ALLOWED"
 else
-  echo "NEXARA_EGRESS_PROBE_UNAVAILABLE"
+  echo "NEXARA_EGRESS_BLOCKED"
 fi
 sync
 echo "NEXARA_GUEST_VALIDATION_COMPLETE"
