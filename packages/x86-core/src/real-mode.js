@@ -125,6 +125,19 @@ export class X86RealModeCpu {
       this.#push(this.flags);
     } else if (opcode === 0x9d) {
       this.flags = (this.#pop() | 2) & 0x0fff;
+    } else if (opcode === 0xcd) {
+      const vector = this.#fetch8();
+      const vectorAddress = vector * 4;
+      this.#push(this.flags);
+      this.#push(this.cs);
+      this.#push(this.ip);
+      this.flags &= ~(IF | TF);
+      this.ip = this.#read16(0, vectorAddress);
+      this.cs = this.#read16(0, vectorAddress + 2);
+    } else if (opcode === 0xcf) {
+      this.ip = this.#pop();
+      this.cs = this.#pop();
+      this.flags = (this.#pop() | 2) & 0x0fff;
     } else {
       this.ip = start;
       throw new Error("Unsupported real-mode opcode 0x" + opcode.toString(16).padStart(2, "0") + " at 0x" + start.toString(16));
