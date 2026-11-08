@@ -1,4 +1,5 @@
 import { lstat } from "node:fs/promises";
+import path from "node:path";
 import { DurableRecoveryJournal } from "./durable-recovery-journal.js";
 import { FirecrackerDriver } from "./firecracker-driver.js";
 import { VmSupervisor } from "./vm-supervisor.js";
@@ -18,11 +19,11 @@ export async function createMicroVmHost({
     throw new TypeError("MicroVM host requires authority, image/base resolvers, and persistent storage directories");
   }
   const registry = new PersistentVmRegistry({
-    directory: stateDirectory + "/vm-registry",
+    directory: path.join(stateDirectory, "vm-registry"),
     overlayDirectory,
     resolveBaseDevice
   });
-  const journal = new DurableRecoveryJournal({ directory: stateDirectory + "/disk-recovery" });
+  const journal = new DurableRecoveryJournal({ directory: path.join(stateDirectory, "disk-recovery") });
 
   const rootDiskFactory = async ({ id, imageDigest, quotas }) => {
     const manifest = await resolveImage(imageDigest);
