@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { GuestMemory, MemoryBlockDevice } from "../packages/runtime/src/index.js";
+import { GuestMemory, MemoryBlockDevice, LegacyBootSectorLoader } from "../packages/runtime/src/index.js";
 import { LegacyBios, X86RealModeCpu } from "../packages/x86-core/src/index.js";
 
 function makeBiosCpu({ disk, code = [0xcd,0x13,0xf4], output = () => {} }) {
@@ -83,4 +83,36 @@ test("INT 10h teletype service emits characters through the host output sink", (
   cpu.bx = 0x0007;
   cpu.run({ maxInstructions: 4 });
   assert.deepEqual(output, ["A"]);
+});
+
+test("legacy boot sector loads and transfers control to a second stage through INT 13h", () => {
+  const disk = new MemoryBlockDevice({ sectors: 16 });
+  const boot = new Uint8Array(512);
+  boot.set([
+    0xbb,0x00,0x7e,       // MOV BX,7E00h
+    0xb8,0x01,0x02,       // MOV AX,0201h (read one sector)
+    0xb9,0x02,0x00,       // MOV CX,0002h (cylinder 0, sector 2)
+    0xba,0x80,0x00,       // MOV DX,0080h (head 0, drive 80h)
+    0xcd,0x13,            // INT 13h
+    0xe9,0xef,0x01         // JMP to 7E00h
+  ]);
+  boot[510] = 0x55;
+  boot[511] = 0xaa;
+  const stage2 = new Uint8Array(512);
+  stage2.set([0xb8,0xef,0xbe,0xf4]); // MOV AX,BEEFh; HLT
+  disk.writeSectors(0, boot);
+  disk.writeSectors(1, stage2);
+
+  const memory = new GuestMemory({ initialPages: 8, maximumPages: 8 });
+  const handoff = new LegacyBootSectorLoader({ disk, memory }).prepare();
+  const bios = new LegacyBios({ disk });
+  const cpu = new X86RealModeCpu({
+    memory, cs: handoff.cs, ip: handoff.ip,
+    interruptHandler: bios.handleInterrupt.bind(bios)
+  });
+  const result = cpu.run({ maxInstructions: 32 });
+  assert.equal(result.state, "halted");
+  assert.equal(cpu.ax, 0xbeef);
+  assert.equal(cpu.ip, 0x7e04);
+  assert.deepEqual(memory.read(0x7e00, 4), Uint8Array.of(0xb8,0xef,0xbe,0xf4));
 });
