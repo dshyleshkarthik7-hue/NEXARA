@@ -19,8 +19,9 @@ export class FirecrackerDriver {
   #provider;
   #resolveImage;
   #timeoutMs;
+  #recoveryJournal;
 
-  constructor({ provider, resolveImage, timeoutMs = 5000 } = {}) {
+  constructor({ provider, resolveImage, recoveryJournal = null, timeoutMs = 5000 } = {}) {
     if (!provider || typeof provider.start !== "function" || typeof provider.stop !== "function"
       || typeof resolveImage !== "function" || !Number.isSafeInteger(timeoutMs)
       || timeoutMs < 100 || timeoutMs > 60000) {
@@ -28,7 +29,9 @@ export class FirecrackerDriver {
     }
     this.#provider = provider;
     this.#resolveImage = resolveImage;
+    if (recoveryJournal !== null && typeof recoveryJournal.save !== "function") throw new TypeError("Invalid durable recovery journal");
     this.#timeoutMs = timeoutMs;
+    this.#recoveryJournal = recoveryJournal;
   }
 
   async launch(config) {
@@ -158,12 +161,32 @@ export class FirecrackerDriver {
       await this.#provider.stop(handle.host);
       handle.stopped = true;
       if (handle.materializedRootfs && handle.rootfsDevice) {
-        // Preserve the raw disk if import fails; it may contain the only copy of guest writes.
         await chmod(handle.materializedRootfs, 0o600);
-        await handle.rootfsDevice.importRaw(handle.materializedRootfs);
+        try {
+          await handle.rootfsDevice.importRaw(handle.materializedRootfs);
+        } catch (writebackError) {
+          // Queue a durable copy before removing the jail-local recovery image.
+          if (!this.#recoveryJournal) {
+            handle.writebackPending = true;
+            throw writebackError;
+          }
+          try {
+            handle.recoveryRecord = await this.#recoveryJournal.save({
+              vmId: handle.id, sourcePath: handle.materializedRootfs
+            });
+            handle.recoveryQueued = true;
+          } catch (journalError) {
+            handle.writebackPending = true;
+            throw new AggregateError([writebackError, journalError], "Guest write-back and durable recovery journaling both failed");
+          }
+        }
       }
-      if (handle.materializedRootfs) await unlink(handle.materializedRootfs).catch(() => {});
-      handle.writebackPending = false;
+      if (handle.materializedRootfs && handle.recoveryQueued) {
+        await unlink(handle.materializedRootfs);
+        handle.writebackPending = false;
+      } else if (handle.materializedRootfs && !handle.writebackPending) {
+        await unlink(handle.materializedRootfs).catch(() => {});
+      }
     }
   }
 
