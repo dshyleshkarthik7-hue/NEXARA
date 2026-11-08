@@ -61,7 +61,7 @@ export class FirecrackerDriver {
       requirePrivateApiSocket: true
     }));
     if (!host || typeof host.socketPath !== "string" || !path.isAbsolute(host.socketPath)
-      || typeof host.stop !== "function") {
+      ) {
       await this.#provider.stop(host).catch(() => {});
       throw new Error("Host provider did not return a private Firecracker API socket and stop handle");
     }
