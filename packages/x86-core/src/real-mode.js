@@ -99,13 +99,78 @@ export class X86RealModeCpu {
     }
   }
 
+
+  #decodeRm(modrm, width = 16) {
+    const mod = modrm >>> 6, reg = (modrm >>> 3) & 7, rm = modrm & 7;
+    if (mod === 3) {
+      return {
+        reg,
+        read: () => width === 8 ? this.#reg8(rm) : this.#reg16(rm),
+        write: value => width === 8 ? this.#setReg8(rm, value) : this.#setReg16(rm, value)
+      };
+    }
+    const bases = [
+      [this.bx, this.si], [this.bx, this.di], [this.bp, this.si], [this.bp, this.di],
+      [this.si], [this.di], null, [this.bx]
+    ];
+    let displacement = 0;
+    if (mod === 0 && rm === 6) displacement = this.#fetch16();
+    else if (mod === 1) {
+      const raw = this.#fetch8();
+      displacement = raw & 0x80 ? raw - 0x100 : raw;
+    } else if (mod === 2) {
+      const raw = this.#fetch16();
+      displacement = raw & 0x8000 ? raw - 0x10000 : raw;
+    }
+    const base = mod === 0 && rm === 6 ? 0 : bases[rm].reduce((sum, value) => sum + value, 0);
+    const offset = (base + displacement) & MASK16;
+    const segment = rm === 2 || rm === 3 || (rm === 6 && mod !== 0) ? this.ss : this.ds;
+    return {
+      reg,
+      read: () => width === 8 ? this.#read8(segment, offset) : this.#read16(segment, offset),
+      write: value => width === 8 ? this.#write8(segment, offset, value) : this.#write16(segment, offset, value)
+    };
+  }
+
+  #stringInstruction(opcode, repeat) {
+    const width = (opcode & 1) ? 2 : 1;
+    const delta = (this.flags & DF) ? -width : width;
+    const count = repeat ? this.cx : 1;
+    for (let i = 0; i < count; i++) {
+      if (opcode === 0xa4 || opcode === 0xa5) {
+        const value = width === 1 ? this.#read8(this.ds, this.si) : this.#read16(this.ds, this.si);
+        if (width === 1) this.#write8(this.es, this.di, value);
+        else this.#write16(this.es, this.di, value);
+        this.si = (this.si + delta) & MASK16;
+        this.di = (this.di + delta) & MASK16;
+      } else if (opcode === 0xaa || opcode === 0xab) {
+        if (width === 1) this.#write8(this.es, this.di, this.ax & 0xff);
+        else this.#write16(this.es, this.di, this.ax);
+        this.di = (this.di + delta) & MASK16;
+      } else if (opcode === 0xac || opcode === 0xad) {
+        if (width === 1) this.#setReg8(0, this.#read8(this.ds, this.si));
+        else this.ax = this.#read16(this.ds, this.si);
+        this.si = (this.si + delta) & MASK16;
+      } else {
+        return false;
+      }
+    }
+    if (repeat) this.cx = 0;
+    return true;
+  }
+
   #push(value) { this.sp = (this.sp - 2) & MASK16; this.#write16(this.ss, this.sp, value); }
   #pop() { const value = this.#read16(this.ss, this.sp); this.sp = (this.sp + 2) & MASK16; return value; }
 
   step() {
     if (this.halted) return Object.freeze({ state: "halted", ip: this.ip });
     const start = this.ip;
-    const opcode = this.#fetch8();
+    let opcode = this.#fetch8();
+    let repeat = false;
+    if (opcode === 0xf3 || opcode === 0xf2) {
+      repeat = true;
+      opcode = this.#fetch8();
+    }
     if (opcode === 0x90) {
       // NOP
     } else if (opcode === 0xf4) {
@@ -142,14 +207,18 @@ export class X86RealModeCpu {
       this.flags = (this.flags & ~CF) | carry
         | ((old & 0x0fff) === 0 ? AF : 0)
         | (old === 0x8000 ? OF : 0);
-    } else if (opcode === 0x31 || opcode === 0x33) {
-      const modrm = this.#fetch8();
-      if ((modrm & 0xc0) !== 0xc0) throw new Error("Real-mode XOR currently supports register operands only");
-      const reg = (modrm >>> 3) & 7, rm = modrm & 7;
-      const left = opcode === 0x31 ? this.#reg16(rm) : this.#reg16(reg);
-      const right = opcode === 0x31 ? this.#reg16(reg) : this.#reg16(rm);
-      this.#setReg16(opcode === 0x31 ? rm : reg, left ^ right);
-      this.#setLogicFlags(left ^ right);
+    } else if (opcode === 0x31 || opcode === 0x33 || opcode === 0x89 || opcode === 0x8b) {
+      const operand = this.#decodeRm(this.#fetch8(), 16);
+      const registerValue = this.#reg16(operand.reg);
+      if (opcode === 0x31 || opcode === 0x89) operand.write(opcode === 0x31 ? operand.read() ^ registerValue : registerValue);
+      else this.#setReg16(operand.reg, opcode === 0x33 ? operand.read() ^ registerValue : operand.read());
+      if (opcode === 0x31 || opcode === 0x33) this.#setLogicFlags(opcode === 0x31 ? operand.read() : this.#reg16(operand.reg));
+    } else if (opcode === 0x88 || opcode === 0x8a) {
+      const operand = this.#decodeRm(this.#fetch8(), 8);
+      if (opcode === 0x88) operand.write(this.#reg8(operand.reg));
+      else this.#setReg8(operand.reg, operand.read());
+    } else if (opcode === 0xa4 || opcode === 0xa5 || opcode === 0xaa || opcode === 0xab || opcode === 0xac || opcode === 0xad) {
+      if (!this.#stringInstruction(opcode, repeat)) throw new Error("Unsupported string operation");
     } else if (opcode === 0x3d) {
       this.#setSubFlags(this.ax, this.#fetch16());
     } else if (opcode === 0x3c) {
