@@ -38,7 +38,9 @@ elif grep -q '^CONFIG_STATIC=' "$BB_SRC/.config"; then
 else
   printf '\nCONFIG_STATIC=y\n' >> "$BB_SRC/.config"
 fi
+set +o pipefail
 yes '' | make -C "$BB_SRC" oldconfig
+set -o pipefail
 make -C "$BB_SRC" CC=musl-gcc -j"$(nproc)"
 install -m 0755 "$BB_SRC/busybox" "$OUT/busybox"
 if readelf -l "$OUT/busybox" | grep -q INTERP; then fail "BusyBox unexpectedly has a dynamic interpreter"; fi
