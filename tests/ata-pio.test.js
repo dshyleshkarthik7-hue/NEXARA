@@ -81,3 +81,38 @@ test("ATA PIO snapshots preserve and independently restore an in-flight data tra
   assert.equal(ata.read(0x1f0, 16), 0x0504n);
   assert.throws(() => ata.restore({ ...snapshot, transferIndex: 256 }), /Invalid ATA PIO snapshot/);
 });
+
+test("ATA PIO reads and writes multiple consecutive LBA28 sectors", () => {
+  const disk = new MemoryBlockDevice({ sectors: 8 });
+  disk.writeSectors(2, new Uint8Array(512).fill(0x12));
+  disk.writeSectors(3, new Uint8Array(512).fill(0x34));
+  const ata = new AtaPioDevice({ disk });
+
+  ata.write(0x1f2, 2);
+  ata.write(0x1f3, 2);
+  ata.write(0x1f4, 0);
+  ata.write(0x1f5, 0);
+  ata.write(0x1f6, 0xe0);
+  ata.write(0x1f7, 0x20);
+  for (let i = 0; i < 256; i++) assert.equal(ata.read(0x1f0, 16), 0x1212n);
+  assert.equal(ata.read(0x1f2), 1n);
+  assert.equal(ata.read(0x1f3), 3n);
+  for (let i = 0; i < 256; i++) assert.equal(ata.read(0x1f0, 16), 0x3434n);
+  assert.equal(ata.read(0x1f2), 0n);
+  assert.equal(ata.read(0x1f3), 4n);
+  assert.equal(ata.read(0x1f7), 0x40n);
+
+  ata.write(0x1f2, 2);
+  ata.write(0x1f3, 4);
+  ata.write(0x1f4, 0);
+  ata.write(0x1f5, 0);
+  ata.write(0x1f6, 0xe0);
+  ata.write(0x1f7, 0x30);
+  for (let i = 0; i < 256; i++) ata.write(0x1f0, 0xaaaa, 16);
+  assert.equal(ata.read(0x1f7), 0x48n);
+  assert.equal(ata.read(0x1f2), 1n);
+  for (let i = 0; i < 256; i++) ata.write(0x1f0, 0xbbbb, 16);
+  assert.equal(ata.read(0x1f7), 0x40n);
+  assert.equal(disk.readSectors(4)[0], 0xaa);
+  assert.equal(disk.readSectors(5)[0], 0xbb);
+});
