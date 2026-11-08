@@ -78,7 +78,6 @@ test("ATA PIO snapshots preserve and independently restore an in-flight data tra
   ata.restore(snapshot);
   assert.equal(ata.read(0x1f0, 16), expectedNext);
   snapshot.transfer[2] = 0xffff;
-  ata.restore({ ...snapshot, transfer: new Uint16Array(256), transferIndex: 256 });
-  assert.equal(ata.snapshot().transferIndex, 256);
-  assert.throws(() => ata.restore({ ...snapshot, transferIndex: 257 }), /Invalid ATA PIO snapshot/);
+  assert.equal(ata.read(0x1f0, 16), 0x0504n);
+  assert.throws(() => ata.restore({ ...snapshot, transferIndex: 256 }), /Invalid ATA PIO snapshot/);
 });
