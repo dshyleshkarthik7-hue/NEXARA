@@ -48,7 +48,7 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   });
   assert.equal(invoked.command, jailer);
   assert.equal(invoked.options.shell, false);
-  assert.equal(invoked.args.includes("--new-pid-ns"), false);
+  assert.equal(invoked.args.includes("--new-pid-ns"), true);
   assert.ok(invoked.args.includes("--netns"));
   assert.ok(invoked.args.includes("/run/netns/nexara-test"));
   assert.ok(invoked.args.includes("cpu.max=150000 100000"));
