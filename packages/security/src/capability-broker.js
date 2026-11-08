@@ -70,7 +70,7 @@ export class VmCapabilityBroker {
       const split = entry.lastIndexOf(":");
       const hasPort = split > -1;
       const name = (hasPort ? entry.slice(0, split) : entry).toLowerCase();
-      return name === host && (!hasPort || entry.slice(split + 1) === port);
+      return name === host && (hasPort ? entry.slice(split + 1) === port : url.protocol === "https:" && port === "443");
     });
     if (!allowed) throw new Error("Network target is not allowlisted by the VM lease");
     return Object.freeze({ url: url.href, hostname: host, port: Number(port), protocol: url.protocol });
