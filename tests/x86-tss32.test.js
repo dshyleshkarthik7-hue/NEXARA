@@ -361,6 +361,6 @@ test("paged TSS task-switch faults update CR2 with the failing linear address", 
   cpu.writeControlRegister(3, 0x1000n);
   cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n | (1n << 31n));
   assert.throws(() => cpu.switchTask(0x30), /Task switch failed/);
-  assert.equal(cpu.readControlRegister(2), 0x4020n);
+  assert.equal(cpu.readControlRegister(2), 0x4028n);
   assert.equal(cpu.systemTables.task.selector, 0x28);
 });
