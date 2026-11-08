@@ -136,7 +136,7 @@ export class DurableRecoveryJournal {
         lock = await open(lockPath, "wx", 0o600);
       }
       try {
-        await lock.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }) + "\\n");
+        await lock.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }) + "\n");
         await lock.sync();
         const results = [];
         for (const record of await this.list()) {
