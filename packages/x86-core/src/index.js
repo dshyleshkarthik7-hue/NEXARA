@@ -133,7 +133,10 @@ export class X86Cpu {
       this.ip = state.eip;
       this.segments = nextSegments;
       return Object.freeze({ ip: this.ip, flags: this.flags, segments: this.segments.snapshot() });
-    } catch (error) { throw new CpuFault(error.message, this.ip); }
+    } catch (error) {
+      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & 0xffffffffn);
+      throw new CpuFault(error.message, this.ip);
+    }
   }
   /**
    * Execute the supported 32-bit protected-mode TSS task-switch paths.
@@ -236,7 +239,10 @@ export class X86Cpu {
       nextSegments.ldt = nextLdt;
       this.segments = nextSegments;
       return Object.freeze({ selector, ip: this.ip, cpl: this.segments.cpl, task: this.systemTables.snapshot().task });
-    } catch (error) { throw new CpuFault("Task switch failed: " + error.message, this.ip); }
+    } catch (error) {
+      if (error instanceof PageFault) this.controlRegisters.set(2, error.address & 0xffffffffn);
+      throw new CpuFault("Task switch failed: " + error.message, this.ip);
+    }
   }
   readControlRegister(index) {
     if (![0, 2, 3, 4].includes(index)) throw new CpuFault("Unsupported control register", this.ip);
@@ -541,6 +547,7 @@ export class X86Cpu {
         const tss = new X86Tss32(this.memory, { base: task.base, limit: task.limit, paging: (this.controlRegisters.get(0) & (1n << 31n)) !== 0n ? this.legacyPaging32 : null });
         if (!tss.allowsIo(port, width)) throw new Error("TSS I/O bitmap denies this port range");
       } catch (error) {
+        if (error instanceof PageFault) this.controlRegisters.set(2, error.address & 0xffffffffn);
         throw new CpuFault("I/O privilege check failed (#GP): " + error.message, start);
       }
     }
