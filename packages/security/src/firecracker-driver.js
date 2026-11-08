@@ -62,7 +62,7 @@ export class FirecrackerDriver {
     }));
     if (!host || typeof host.socketPath !== "string" || !path.isAbsolute(host.socketPath)
       ) {
-      await this.#provider.stop(host).catch(() => {});
+      await Promise.resolve().then(() => this.#provider.stop(host)).catch(() => {});
       throw new Error("Host provider did not return a private Firecracker API socket and stop handle");
     }
 
@@ -99,7 +99,7 @@ export class FirecrackerDriver {
       handle.started = true;
       return handle;
     } catch (error) {
-      await this.#provider.stop(host).catch(() => {});
+      await Promise.resolve().then(() => this.#provider.stop(host)).catch(() => {});
       throw error;
     }
   }
