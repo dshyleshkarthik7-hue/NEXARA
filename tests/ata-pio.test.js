@@ -32,11 +32,15 @@ test("ATA PIO writes and reads one LBA28 sector through the data register", () =
   const stored = disk.readSectors(0x123);
   assert.equal(stored[0], 0x5a);
   assert.equal(stored[1], 0xa5);
+  assert.equal(ata.read(0x1f2), 0n);
+  assert.equal(ata.read(0x1f3), 0x24n);
 
   setLba(ata, 0x123);
   ata.write(0x1f7, 0x20);
   for (let i = 0; i < 256; i++) assert.equal(ata.read(0x1f0, 16), BigInt((i ^ 0xa55a) & 0xffff));
   assert.equal(ata.read(0x1f7), 0x40n);
+  assert.equal(ata.read(0x1f2), 0n);
+  assert.equal(ata.read(0x1f3), 0x24n);
 });
 
 test("ATA PIO rejects unsupported multi-sector, non-LBA and out-of-range commands", () => {
