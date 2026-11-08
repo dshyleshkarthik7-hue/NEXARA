@@ -70,3 +70,6 @@ The CPU now has a narrowly scoped 32-bit protected-mode ring-transition implemen
 4. Add firmware and bootable 32-bit guest support, then expand CPU/OS compatibility.
 5. Add deterministic record/replay and provenance verification after device behavior is stable.
 6. Run conformance, fuzz, escape, performance and recovery suites before claiming readiness.
+
+
+The VM lifecycle coordinator also supports configurable aggregate instance, CPU, memory and disk admission limits. Starting instances count against aggregate capacity, and `reapExpired()` stops instances whose signed lease no longer verifies. These are supervisor-side admission and lifecycle controls; the external microVM driver remains responsible for enforcing quotas in the hypervisor and host OS. They do not substitute for cgroups, KVM isolation, a jailer, or a host firewall.
