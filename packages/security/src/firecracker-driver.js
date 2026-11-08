@@ -139,6 +139,9 @@ export class FirecrackerDriver {
       return handle;
     } catch (error) {
       await Promise.resolve().then(() => this.#provider.stop(host)).catch(() => {});
+      // The guest has not been admitted as running; this materialized image is
+      // only a launch-time copy and contains no guest writes to preserve.
+      if (handle.materializedRootfs) await unlink(handle.materializedRootfs).catch(() => {});
       throw error;
     }
   }
