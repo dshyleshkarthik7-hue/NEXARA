@@ -137,6 +137,68 @@ export class X86Cpu {
       return Object.freeze({ ip: this.ip, flags: this.flags, segments: this.segments.snapshot() });
     } catch (error) { throw new CpuFault(error.message, this.ip); }
   }
+  /**
+   * Execute the bounded 32-bit JMP-to-TSS task-switch subset. CALL, task
+   * gates, nested tasks and paging-enabled switches are intentionally excluded.
+   */
+  switchTask(selector, { reason = "jmp", returnIp = this.ip } = {}) {
+    if (this.mode !== 32 || (this.controlRegisters.get(0) & 1n) === 0n) throw new CpuFault("Hardware task switching requires 32-bit protected mode", this.ip);
+    if ((this.controlRegisters.get(0) & (1n << 31n)) !== 0n) throw new CpuFault("Task switching with paging enabled is not supported", this.ip);
+    if (reason !== "jmp") throw new CpuFault("Only JMP task switches are implemented; CALL/task-gate switches are unsupported", this.ip);
+    if (!Number.isInteger(selector) || selector <= 0 || selector > 0xffff || (selector & 4) !== 0) throw new CpuFault("Task switch requires a non-null GDT selector", this.ip);
+    if (!Number.isSafeInteger(returnIp) || returnIp < 0 || returnIp > 0xffffffff) throw new CpuFault("Task return IP is outside 32-bit range", this.ip);
+    const current = this.systemTables.task;
+    if (!current.usable || !current.present || !current.busy || current.limit < 0x67) throw new CpuFault("Current TR must reference a usable busy 32-bit TSS", this.ip);
+    try {
+      const currentDescriptor = this.gdt.readSystemDescriptor(current.selector, { allowedTypes: [11] });
+      if (currentDescriptor.base !== current.base || currentDescriptor.limit < 0x67n) throw new Error("Current TR does not match its busy GDT TSS descriptor");
+      const targetDescriptor = this.gdt.readSystemDescriptor(selector, { allowedTypes: [9] });
+      if (Math.max(this.segments.cpl, selector & 3) > targetDescriptor.dpl) throw new Error("Task-switch selector privilege check failed");
+      if (targetDescriptor.limit < 0x67n || targetDescriptor.base > 0xffffffffn) throw new Error("Target TSS must be a bounded 32-bit TSS with a 104-byte header");
+      const targetTss = new X86Tss32(this.memory, { base: targetDescriptor.base, limit: Number(targetDescriptor.limit) });
+      const incoming = targetTss.getTaskState();
+      if ((incoming.eflags & 2) === 0) throw new Error("Incoming TSS EFLAGS reserved bit 1 must be set");
+      const targetCpl = incoming.segments.cs & 3;
+      let nextLdtr = null;
+      let nextLdt = null;
+      if ((incoming.segments.ldt & 0xfff8) !== 0) {
+        const ldtDescriptor = this.gdt.readSystemDescriptor(incoming.segments.ldt, { allowedTypes: [2] });
+        if (ldtDescriptor.limit > 0xffffn || ldtDescriptor.base + ldtDescriptor.limit >= BigInt(this.memory.byteLength)) throw new Error("Incoming LDT exceeds guest memory or supported bounds");
+        nextLdtr = { selector: incoming.segments.ldt, base: ldtDescriptor.base, limit: Number(ldtDescriptor.limit), present: true, usable: true };
+        nextLdt = new X86DescriptorTable(this.memory, { base: ldtDescriptor.base, limit: Number(ldtDescriptor.limit), kind: "ldt", longMode: false });
+      }
+      const nextSegments = new X86SegmentState({ gdt: this.gdt, ldt: nextLdt, cpl: targetCpl, longMode: false });
+      nextSegments.installCodeSegment(incoming.segments.cs);
+      nextSegments.loadStack(incoming.segments.ss);
+      for (const name of ["es", "ds", "fs", "gs"]) nextSegments.loadData(name, incoming.segments[name]);
+      if (BigInt(incoming.eip) > nextSegments.registers.cs.cache.limit) throw new Error("Incoming TSS EIP exceeds code-segment limit");
+      const oldTss = new X86Tss32(this.memory, { base: current.base, limit: current.limit });
+      oldTss.setTaskState({
+        eip: returnIp, eflags: Number(this.flags & 0xffffffffn),
+        registers: { eax: Number(this.getRegister(0, 32)), ecx: Number(this.getRegister(1, 32)), edx: Number(this.getRegister(2, 32)), ebx: Number(this.getRegister(3, 32)),
+          esp: Number(this.getRegister(4, 32)), ebp: Number(this.getRegister(5, 32)), esi: Number(this.getRegister(6, 32)), edi: Number(this.getRegister(7, 32)) },
+        segments: { es: this.segments.registers.es.selector, cs: this.segments.registers.cs.selector, ss: this.segments.registers.ss.selector,
+          ds: this.segments.registers.ds.selector, fs: this.segments.registers.fs.selector, gs: this.segments.registers.gs.selector, ldt: this.systemTables.ldtr.selector }
+      });
+      const targetAccessAddress = this.gdt.base + BigInt((selector >>> 3) * 8 + 5);
+      const currentAccessAddress = this.gdt.base + BigInt((current.selector >>> 3) * 8 + 5);
+      if (targetAccessAddress >= BigInt(this.memory.byteLength) || currentAccessAddress >= BigInt(this.memory.byteLength)) throw new Error("TSS descriptor access byte exceeds guest memory");
+      // Descriptor writes and the CPU commit occur only after the incoming image validates.
+      const targetAccess = targetDescriptor.raw[5] | 2;
+      const currentAccess = currentDescriptor.raw[5] & ~2;
+      this.memory.write(Number(targetAccessAddress), Uint8Array.of(targetAccess));
+      this.memory.write(Number(currentAccessAddress), Uint8Array.of(currentAccess));
+      if (nextLdtr) this.systemTables.loadLdtr(nextLdtr); else this.systemTables.clearLdtr();
+      this.systemTables.loadTaskRegister({ selector, base: targetDescriptor.base, limit: Number(targetDescriptor.limit), present: true, busy: true, usable: true });
+      this.#syncDescriptorTables();
+      for (let i = 0; i < 8; i++) this.setRegister(i, BigInt(incoming.registers[["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"][i]]), 32);
+      this.controlRegisters.set(3, BigInt(targetTss.cr3));
+      this.flags = BigInt(incoming.eflags) & ~(1n << 14n); // JMP clears NT.
+      this.ip = incoming.eip;
+      this.segments = nextSegments;
+      return Object.freeze({ selector, ip: this.ip, cpl: this.segments.cpl, task: this.systemTables.snapshot().task });
+    } catch (error) { throw new CpuFault("Task switch failed: " + error.message, this.ip); }
+  }
   readControlRegister(index) {
     if (![0, 2, 3, 4].includes(index)) throw new CpuFault("Unsupported control register", this.ip);
     return this.controlRegisters.get(index);
