@@ -70,7 +70,8 @@ test("durable recovery journal excludes concurrent replay workers", async t => {
     importRaw: async () => { entered(); await blocked; return { changedSectors: 1 }; }
   }));
   await enteredPromise;
-  await assert.rejects(() => journal.recoverPending(async () => ({ importRaw: async () => ({}) })), /already running/);
+  const competingJournal = new DurableRecoveryJournal({ directory: path.join(root, "journal") });
+  await assert.rejects(() => competingJournal.recoverPending(async () => ({ importRaw: async () => ({}) })), /already running/);
   release();
   await first;
   assert.equal((await journal.list()).length, 0);
