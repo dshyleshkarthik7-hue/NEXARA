@@ -3,6 +3,12 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { randomBytes, randomUUID } from "node:crypto";
 import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { VmLeaseAuthority } from "../../../packages/security/src/lease.js";
+import { createMicroVmHost } from "../../../packages/security/src/microvm-host.js";
+import { LinuxJailerProvider } from "../../../packages/security/src/linux-jailer-provider.js";
+import { LinuxNetworkProvider } from "../../../packages/security/src/linux-network-provider.js";
 import pty from "node-pty";
 import { isClientMessage } from "../../../packages/protocol/src/index.js";
 import { SessionRegistry } from "./session-registry.js";
@@ -20,6 +26,54 @@ if (allowUnsandboxedHostPty && !sandboxEnabled && !["127.0.0.1", "localhost", ":
 }
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || "http://localhost:5173").split(",").map(s => s.trim()).filter(Boolean));
 const maxSessions = Math.max(1, Number.parseInt(process.env.NEXARA_MAX_SESSIONS || "4", 10) || 4);
+
+const executionBackend = process.env.NEXARA_EXECUTION_BACKEND || "pty";
+let microVmHost = null;
+let microVmAuth = null;
+let vmAuthority = null;
+if (executionBackend === "microvm") {
+  if (process.platform !== "linux") throw new Error("The microVM backend requires Linux");
+  const adapterPath = process.env.NEXARA_MICROVM_ADAPTER;
+  const secret = process.env.NEXARA_VM_LEASE_SECRET;
+  if (!adapterPath || !path.isAbsolute(adapterPath) || !secret || Buffer.byteLength(secret) < 32) {
+    throw new Error("MicroVM mode requires an absolute NEXARA_MICROVM_ADAPTER and a 32-byte NEXARA_VM_LEASE_SECRET");
+  }
+  const adapterModule = await import(pathToFileURL(adapterPath).href);
+  const adapter = typeof adapterModule.createNexaraMicroVmDependencies === "function"
+    ? await adapterModule.createNexaraMicroVmDependencies()
+    : adapterModule.default;
+  if (!adapter || typeof adapter.resolveImage !== "function"
+    || typeof adapter.resolveBaseDevice !== "function"
+    || typeof adapter.authenticateRequest !== "function") {
+    throw new Error("MicroVM adapter must export resolveImage, resolveBaseDevice and authenticateRequest");
+  }
+  const networkProvider = new LinuxNetworkProvider({
+    ipPath: process.env.NEXARA_IP_PATH || "/usr/sbin/ip",
+    nftPath: process.env.NEXARA_NFT_PATH || "/usr/sbin/nft"
+  });
+  const provider = new LinuxJailerProvider({
+    jailerPath: process.env.NEXARA_JAILER_PATH || "/usr/bin/jailer",
+    firecrackerPath: process.env.NEXARA_FIRECRACKER_PATH || "/usr/bin/firecracker",
+    chrootBaseDir: process.env.NEXARA_JAILER_ROOT || "/srv/jailer",
+    uid: Number(process.env.NEXARA_JAILER_UID),
+    gid: Number(process.env.NEXARA_JAILER_GID),
+    parentCgroup: process.env.NEXARA_PARENT_CGROUP || "nexara",
+    networkProvider
+  });
+  vmAuthority = new VmLeaseAuthority(secret);
+  microVmAuth = adapter.authenticateRequest;
+  microVmHost = await createMicroVmHost({
+    authority: vmAuthority,
+    provider,
+    resolveImage: adapter.resolveImage,
+    resolveBaseDevice: adapter.resolveBaseDevice,
+    stateDirectory: process.env.NEXARA_VM_STATE_DIR || "/var/lib/nexara",
+    overlayDirectory: process.env.NEXARA_VM_OVERLAY_DIR || "/var/lib/nexara/overlays"
+  });
+} else if (executionBackend !== "pty") {
+  throw new Error("NEXARA_EXECUTION_BACKEND must be pty or microvm");
+}
+
 const registry = new SessionRegistry({
   maxSessions,
   maxSessionsPerOwner: Math.max(1, Number.parseInt(process.env.NEXARA_MAX_SESSIONS_PER_CLIENT || "2", 10) || 2),
@@ -55,9 +109,60 @@ app.get("/health", async () => ({ name: "NEXARA", status: "ok", version: 1 }));
 app.get("/api/capabilities", async () => ({
   protocolVersion: 1,
   sessionSecurity: { perSessionSecret: true, originAllowlist: true, perClientQuota: true, creationRateLimit: true, idleTimeoutMs: registry.idleTimeoutMs },
-  backends: [sandboxCapabilities({ runtime: sandboxRuntime, imageConfigured: sandboxEnabled }), { id: "host-pty", label: "Unsandboxed host process terminal", available: allowUnsandboxedHostPty, machineEmulation: false, isolated: false }],
+  backends: [sandboxCapabilities({ runtime: sandboxRuntime, imageConfigured: sandboxEnabled }), { id: "host-pty", label: "Unsandboxed host process terminal", available: allowUnsandboxedHostPty, machineEmulation: false, isolated: false }, { id: "firecracker-microvm", label: "Firecracker microVM", available: Boolean(microVmHost), machineEmulation: true, isolated: Boolean(microVmHost), recoveryComplete: Boolean(microVmHost) }],
   architectures: { x86: { supported: false }, x86_64: { supported: false } }
 }));
+
+
+if (executionBackend === "microvm") {
+  app.post("/api/vms", async (request, reply) => {
+    let identity;
+    try { identity = await microVmAuth(request); }
+    catch { return reply.code(401).send({ error: "Authentication required" }); }
+    if (!identity || typeof identity.subject !== "string" || identity.subject.length < 1 || identity.subject.length > 128) {
+      return reply.code(401).send({ error: "Authentication required" });
+    }
+    try {
+      const body = request.body || {};
+      const envelope = vmAuthority.issue({
+        subject: identity.subject,
+        imageDigest: body.imageDigest,
+        quotas: body.quotas,
+        capabilities: body.capabilities,
+        egress: body.egress
+      });
+      const vm = await microVmHost.supervisor.create({
+        envelope, subject: identity.subject, imageDigest: body.imageDigest
+      });
+      return reply.code(201).send(vm);
+    } catch (error) {
+      request.log.warn(error, "MicroVM creation rejected");
+      return reply.code(400).send({ error: "VM request could not be admitted" });
+    }
+  });
+
+  app.get("/api/vms", async (request, reply) => {
+    let identity;
+    try { identity = await microVmAuth(request); } catch {}
+    if (!identity?.subject) return reply.code(401).send({ error: "Authentication required" });
+    return microVmHost.supervisor.list().filter(vm => vm.subject === identity.subject);
+  });
+
+  app.delete("/api/vms/:id", async (request, reply) => {
+    let identity;
+    try { identity = await microVmAuth(request); } catch {}
+    if (!identity?.subject) return reply.code(401).send({ error: "Authentication required" });
+    const vm = microVmHost.supervisor.get(request.params.id);
+    if (!vm || vm.subject !== identity.subject) return reply.code(404).send({ error: "VM not found" });
+    try {
+      await microVmHost.supervisor.stop(request.params.id);
+      return reply.code(204).send();
+    } catch (error) {
+      request.log.error(error, "MicroVM shutdown failed");
+      return reply.code(503).send({ error: "VM shutdown failed; host recovery may be required" });
+    }
+  });
+}
 
 app.post("/api/sessions", async (request, reply) => {
   if (!sandboxEnabled && !allowUnsandboxedHostPty) return reply.code(503).send({ error: "No execution backend configured. Configure NEXARA_SANDBOX_IMAGE and a sandbox runtime; unsandboxed host PTY is disabled by default." });
@@ -154,6 +259,7 @@ idleSweep.unref?.();
 app.addHook("onClose", async () => {
   clearInterval(idleSweep);
   registry.closeAll();
+  if (microVmHost) await microVmHost.close();
 });
 
 try {
