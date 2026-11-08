@@ -673,8 +673,10 @@ export class X86Cpu {
       const gate = this.idt.readGate(vector, { cpl: oldCpl, software });
       if (gate.taskGate) {
         if (gate.offset !== 0n) throw new Error("Task gate reserved offset must be zero");
-        if (errorCode !== null) throw new Error("Task-gate exception delivery with an error code is not implemented");
         this.switchTask(gate.selector, { reason: "task-gate", returnIp });
+        // Exception error codes are pushed on the incoming task's stack,
+        // after the hardware task switch has loaded its SS:ESP.
+        if (errorCode !== null) this.#push(errorCode, 32);
         return;
       }
       const target = this.gdt.readSegment(gate.selector, { cpl: 0 });
