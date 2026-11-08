@@ -21,6 +21,9 @@ const journal = new DurableRecoveryJournal({
 });
 
 const supervisor = new VmSupervisor({
+  // workloadKey is a host-control-plane identifier, not guest input.
+  resolveVmIdentity: ({ workloadKey, subject, imageDigest }) =>
+    storage.getOrCreateIdentity({ workloadKey, subject, imageDigest }),
   authority,
   driver,
   recoveryJournal: journal,
@@ -30,9 +33,10 @@ const supervisor = new VmSupervisor({
     sectors: Math.floor(quotas.diskMiB * 1024 * 1024 / 512),
     baseDigest: trustedImageStore.baseDigestFor(imageDigest)
   }),
-  releaseRootDisk: async vmId => {
-    // Close/release only after driver stop and journal recovery policy permit it.
-    await storage.remove(vmId);
+  releaseRootDisk: async (vmId, device) => {
+    // Close the active COW handle after Firecracker has completed write-back.
+    // Keep its registry record and overlay so the next host can reopen it.
+    await device.close();
   }
 });
 
@@ -53,3 +57,10 @@ The example is an integration pattern; adapt the image-store calls and root disk
 - Journal replay remains a supervisor startup barrier when configured.
 
 The registry does not itself authenticate the image store, encrypt disks, coordinate multi-host distributed locking, or make storage durable against hardware that lies about flushes. The current registry is host-local; shared multi-host scheduling requires a distributed lease/consensus mechanism.
+
+
+## Stable VM identity
+
+The registry's `getOrCreateIdentity({ workloadKey, subject, imageDigest })` stores a random host-generated UUID under a SHA-256 hash of the host control-plane workload key. The supervisor can use it through `resolveVmIdentity` so a restarted supervisor receives the same VM UUID and therefore reopens the same registered overlay. The workload key must come from an authenticated host control plane; never accept a guest-provided key. A workload key is bound to one tenant subject and image digest; rebinding is rejected.
+
+The supervisor now passes the broker-owned disk handle to `releaseRootDisk(vmId, device)`. Close the handle after the driver has stopped and completed write-back, but retain the registry record and overlay for subsequent restarts. Do not remove the persistent storage record as part of an ordinary VM stop.
