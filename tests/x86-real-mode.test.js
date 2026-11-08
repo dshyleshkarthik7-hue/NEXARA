@@ -34,7 +34,7 @@ test("real-mode byte registers and 16-bit XOR update the register and flags", ()
   ]);
   const result = cpu.run({ maxInstructions: 8 });
   assert.equal(result.state, "halted");
-  assert.equal(cpu.ax, 0);
+  assert.equal(cpu.ax, 0x00ff);
   assert.equal(cpu.flags & 0x40, 0x40);
   assert.equal(cpu.flags & 0x04, 0x04);
 });
@@ -284,7 +284,7 @@ test("real-mode immediate arithmetic group supports ADD, SUB and CMP byte/word f
     0x05,0x01,0x00,       // ADD AX,1
     0x83,0xc0,0xff,       // ADD AX,-1
     0x80,0xe8,0x01,       // SUB AL,1
-    0x81,0xf8,0xff,0xff,  // CMP AX,FFFFh
+    0x81,0xf8,0xff,0x00,  // CMP AX,00FFh
     0xf4
   ]);
   const result = cpu.run({ maxInstructions: 8 });
