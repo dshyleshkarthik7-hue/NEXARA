@@ -142,7 +142,10 @@ export class FirecrackerDriver {
 
   async stop(handle) {
     if (!handle || !handle.host) throw new TypeError("Invalid Firecracker instance handle");
-    if (handle.stopped) return;
+    if (handle.stopped) {
+      if (handle.writebackPending) return this.retryWriteback(handle);
+      return;
+    }
     try {
       if (handle.started) {
         await apiRequest(handle.host.socketPath, "PUT", "/actions", {
@@ -163,6 +166,21 @@ export class FirecrackerDriver {
       handle.writebackPending = false;
     }
   }
+
+  /** Retry persistence after a previous shutdown left a recoverable raw disk behind. */
+  async retryWriteback(handle) {
+    if (!handle || !handle.stopped || !handle.writebackPending
+      || !handle.materializedRootfs || !handle.rootfsDevice
+      || typeof handle.rootfsDevice.importRaw !== "function") {
+      throw new TypeError("No recoverable guest disk write-back is pending");
+    }
+    await chmod(handle.materializedRootfs, 0o600);
+    const result = await handle.rootfsDevice.importRaw(handle.materializedRootfs);
+    await unlink(handle.materializedRootfs);
+    handle.writebackPending = false;
+    return result;
+  }
+
 }
 
 async function verifyFileDigest(filePath, expected) {
