@@ -91,3 +91,36 @@ test("supervisor reaps expired leases and releases aggregate capacity", async ()
   await supervisor.create({ envelope: lease(now), subject: "tenant-1", imageDigest: digest });
   await supervisor.close();
 });
+
+
+test("supervisor blocks VM admission until durable recovery succeeds", async () => {
+  let replayCalls = 0;
+  let launches = 0;
+  let fail = true;
+  const recoveryJournal = {
+    recoverPending: async resolver => {
+      replayCalls++;
+      assert.equal(typeof resolver, "function");
+      if (fail) throw new Error("overlay not ready");
+      return [{ vmId: "pending-vm" }];
+    }
+  };
+  const supervisor = new VmSupervisor({
+    authority,
+    driver: { isolationType: "microvm", launch: async () => { launches++; return {}; }, stop: async () => {} },
+    clock: () => 1010,
+    recoveryJournal,
+    resolveRecoveryDevice: async () => ({ importRaw: async () => ({}) })
+  });
+  await assert.rejects(() => supervisor.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest }), /recovery must complete/);
+  assert.equal(launches, 0);
+  await assert.rejects(() => supervisor.initialize(), /overlay not ready/);
+  await assert.rejects(() => supervisor.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest }), /recovery must complete/);
+  fail = false;
+  assert.deepEqual(await supervisor.initialize(), [{ vmId: "pending-vm" }]);
+  const vm = await supervisor.create({ envelope: lease(), subject: "tenant-1", imageDigest: digest });
+  assert.equal(vm.state, "running");
+  assert.equal(launches, 1);
+  assert.equal(replayCalls, 2);
+  await supervisor.close();
+});
