@@ -184,9 +184,6 @@ export class AtaPioDevice {
         } catch {
           this.#fail();
         }
-        this.transfer = null;
-        this.transferKind = null;
-        this.transferIndex = 0;
       }
       return;
     }
