@@ -88,6 +88,7 @@ export class X86RealModeCpu {
       (result & sign ? SF : 0) |
       (([0,1,2,3,4,5,6,7].filter(bit => (result >>> bit) & 1).length % 2 === 0) ? PF : 0) |
       (((a ^ b) & (a ^ result) & sign) ? OF : 0) | 2;
+    return result;
   }
 
   #condition(code) {
