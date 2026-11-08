@@ -77,6 +77,10 @@ export class X86RealModeCpu {
       this.#setReg16(opcode - 0xb8, this.#fetch16());
     } else if (opcode >= 0xb0 && opcode <= 0xb7) {
       this.#setReg8(opcode - 0xb0, this.#fetch8());
+    } else if (opcode >= 0x50 && opcode <= 0x57) {
+      this.#push(this.#reg16(opcode - 0x50));
+    } else if (opcode >= 0x58 && opcode <= 0x5f) {
+      this.#setReg16(opcode - 0x58, this.#pop());
     } else if (opcode >= 0x40 && opcode <= 0x47) {
       const old = this.#reg16(opcode - 0x40), result = (old + 1) & MASK16;
       const carry = this.flags & CF;
