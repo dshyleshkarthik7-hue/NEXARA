@@ -150,18 +150,16 @@ export class FirecrackerDriver {
         }, this.#timeoutMs).catch(() => {});
       }
     } finally {
-      try {
-        await this.#provider.stop(handle.host);
-        if (handle.materializedRootfs && handle.rootfsDevice) {
-          // Firecracker must be stopped before importing its final raw disk state.
-          await chmod(handle.materializedRootfs, 0o600);
-          await handle.rootfsDevice.importRaw(handle.materializedRootfs);
-        }
-      } finally {
-        if (handle.materializedRootfs) await unlink(handle.materializedRootfs).catch(() => {});
-        handle.started = false;
-        handle.stopped = true;
+      handle.started = false;
+      await this.#provider.stop(handle.host);
+      handle.stopped = true;
+      if (handle.materializedRootfs && handle.rootfsDevice) {
+        // Preserve the raw disk if import fails; it may contain the only copy of guest writes.
+        await chmod(handle.materializedRootfs, 0o600);
+        await handle.rootfsDevice.importRaw(handle.materializedRootfs);
       }
+      if (handle.materializedRootfs) await unlink(handle.materializedRootfs).catch(() => {});
+      handle.writebackPending = false;
     }
   }
 }
