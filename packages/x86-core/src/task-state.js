@@ -72,6 +72,9 @@ export class X86Tss32 {
     return this.getRingStack(ring);
   }
 
+  get cr3() { return this.#read32(28); }
+  set cr3(value) { this.#write32(28, value); }
+
   get backlink() { return this.#read16(0); }
   set backlink(value) { this.#write16(0, value); }
 
