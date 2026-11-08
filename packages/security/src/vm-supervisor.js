@@ -17,6 +17,8 @@ export class VmSupervisor {
   #limits;
   #recoveryJournal;
   #resolveRecoveryDevice;
+  #recoveryComplete;
+  #recoveryPromise = null;
 
   constructor({ authority, driver, clock = Date.now, limits = {}, recoveryJournal = null, resolveRecoveryDevice = null } = {}) {
     if (!authority || typeof authority.verify !== "function"
@@ -42,10 +44,14 @@ export class VmSupervisor {
     this.#clock = clock;
     this.#recoveryJournal = recoveryJournal;
     this.#resolveRecoveryDevice = resolveRecoveryDevice;
+    // A configured journal is a startup barrier: no workload may launch until
+    // every pending disk has been replayed successfully.
+    this.#recoveryComplete = !recoveryJournal;
   }
 
   async create({ envelope, subject, imageDigest } = {}) {
     if (this.#closed) throw new Error("VM supervisor is closed");
+    if (!this.#recoveryComplete) throw new Error("VM supervisor recovery must complete before VM admission");
     const lease = this.#authority.verify(envelope, {
       now: this.#clock(), subject, imageDigest
     });
@@ -78,10 +84,28 @@ export class VmSupervisor {
   }
 
   /** Replay durable guest-disk write-back records before admitting new workloads. */
+  async initialize() {
+    // Call once during host service startup, before exposing the supervisor.
+    // It is safe to call repeatedly; concurrent callers share one replay.
+    return this.recoverPending();
+  }
+
   async recoverPending() {
     if (this.#closed) throw new Error("VM supervisor is closed");
     if (!this.#recoveryJournal) return [];
-    return this.#recoveryJournal.recoverPending(this.#resolveRecoveryDevice);
+    if (this.#recoveryComplete) return [];
+    if (this.#recoveryPromise) return this.#recoveryPromise;
+    this.#recoveryPromise = (async () => {
+      try {
+        const recovered = await this.#recoveryJournal.recoverPending(this.#resolveRecoveryDevice);
+        this.#recoveryComplete = true;
+        return recovered;
+      } finally {
+        // On failure admission remains blocked and a later call can retry.
+        this.#recoveryPromise = null;
+      }
+    })();
+    return this.#recoveryPromise;
   }
 
   /** Stops running VMs whose signed lease has expired or become invalid. */
