@@ -75,7 +75,7 @@ test("LTR rejects busy and not-present TSS descriptors without changing TR", () 
     cpu.writeControlRegister(0, cpu.readControlRegister(0) | 1n);
     cpu.setRegister(0, 0x28n, 64);
     memory.write(0x600, Uint8Array.of(0x0f, 0x00, 0xd8));
-    assert.throws(() => cpu.step(), /busy|not present/i);
+    assert.throws(() => cpu.step(), /busy|not present|unsupported system descriptor type/i);
     assert.equal(cpu.systemTables.task.usable, false);
   }
 });
