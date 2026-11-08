@@ -45,7 +45,7 @@ test("persistent VM registry reconstructs the same COW overlay from stable VM id
   await restored.close();
 });
 
-test("registry rejects duplicate registration and untrusted VM IDs", async t => {
+test("registry reopens existing overlays and rejects untrusted VM IDs", async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), "nexara-vm-registry-dup-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const registry = new PersistentVmStorageRegistry({
@@ -54,7 +54,10 @@ test("registry rejects duplicate registration and untrusted VM IDs", async t => 
   });
   const device = await registry.createDevice({ vmId, sectors, baseDigest });
   await device.close();
-  await assert.rejects(() => registry.createDevice({ vmId, sectors, baseDigest }), /already registered/);
+  const reopened = await registry.createDevice({ vmId, sectors, baseDigest });
+  assert.equal(Buffer.from(await reopened.readSectors(0, 1)).length, 512);
+  await reopened.close();
+  await assert.rejects(() => registry.createDevice({ vmId, sectors, baseDigest: "sha256:" + "f".repeat(64) }), /already bound/);
   await assert.rejects(() => registry.getRecord("../../escape"), /must be a UUID/);
 });
 
