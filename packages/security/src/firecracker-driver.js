@@ -106,7 +106,7 @@ export class FirecrackerDriver {
         await copyFile(manifest.rootfsPath, rootfsTarget);
       }
       await chmod(kernelTarget, 0o444);
-      await chmod(rootfsTarget, manifest.readOnlyRootfs === true ? 0o444 : 0o660);
+      await chmod(rootfsTarget, config.rootfsDevice !== undefined ? 0o660 : (manifest.readOnlyRootfs === true ? 0o444 : 0o660));
       await chown(rootfsTarget, host.uid, host.gid);
       await apiRequest(host.socketPath, "PUT", "/machine-config", {
         vcpu_count: Math.max(1, Math.ceil(config.quotas.cpuMillis / 1000)),
@@ -121,7 +121,7 @@ export class FirecrackerDriver {
         drive_id: "rootfs",
         path_on_host: "/nexara/rootfs.ext4",
         is_root_device: true,
-        is_read_only: manifest.readOnlyRootfs === true
+        is_read_only: config.rootfsDevice === undefined && manifest.readOnlyRootfs === true
       }, this.#timeoutMs);
       const tapName = host.network?.tapName ?? manifest.networkInterface?.hostDevName;
       if (tapName !== undefined) {
