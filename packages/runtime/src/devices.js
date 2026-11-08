@@ -1,3 +1,4 @@
+import { AtaPioDevice } from "./ata-pio.js";
 /**
  * Deterministic PC/AT interrupt-controller and PIT models.
  * These are device primitives; CPU IDT delivery and full chipset timing remain separate.
@@ -227,33 +228,38 @@ export class Pit8253 {
  * acknowledged PIC vector on a CPU implementing requestInterrupt(vector).
  */
 export class PcAtInterruptFabric {
-  constructor({ pic = new Pic8259(), pit = new Pit8253() } = {}) {
-    if (!(pic instanceof Pic8259) || !(pit instanceof Pit8253)) throw new TypeError("Invalid PC interrupt devices");
+  constructor({ pic = new Pic8259(), pit = new Pit8253(), ata = null } = {}) {
+    if (!(pic instanceof Pic8259) || !(pit instanceof Pit8253)
+      || (ata !== null && !(ata instanceof AtaPioDevice))) throw new TypeError("Invalid PC interrupt or storage devices");
     this.pic = pic;
     this.pit = pit;
+    this.ata = ata;
   }
 
   read(port, width = 8) {
-    if (width !== 8) throw new RangeError("PC/AT PIC and PIT ports currently support byte reads only");
-    return this.ioRead(port);
+    return this.ioRead(port, width);
   }
 
   write(port, value, width = 8) {
-    if (width !== 8) throw new RangeError("PC/AT PIC and PIT ports currently support byte writes only");
     const numeric = Number(value);
-    if (!Number.isInteger(numeric) || numeric < 0 || numeric > 255) throw new RangeError("I/O value must fit in one byte");
-    return this.ioWrite(port, numeric);
+    const maximum = width === 16 ? 0xffff : width === 8 ? 0xff : -1;
+    if (!Number.isInteger(numeric) || numeric < 0 || numeric > maximum) throw new RangeError("I/O value does not fit access width");
+    return this.ioWrite(port, numeric, width);
   }
 
-  ioWrite(port, value) {
+  ioWrite(port, value, width = 8) {
     if (!Number.isInteger(port) || port < 0 || port > 0xffff) throw new RangeError("Invalid I/O port");
+    if (port >= 0x1f0 && port <= 0x1f7 && this.ata) return this.ata.write(port, value, width);
+    if (width !== 8) throw new RangeError("PC/AT PIC and PIT ports support byte accesses only");
     if (port === 0x20 || port === 0x21 || port === 0xa0 || port === 0xa1) return this.pic.write(port, value);
     if (port === 0x40) return this.pit.writeCounter0(value);
     if (port === 0x43) return this.pit.writeControl(value);
     throw new RangeError("Unmapped PC I/O port");
   }
 
-  ioRead(port) {
+  ioRead(port, width = 8) {
+    if (port >= 0x1f0 && port <= 0x1f7 && this.ata) return this.ata.read(port, width);
+    if (width !== 8) throw new RangeError("PC/AT PIC and PIT ports support byte accesses only");
     if (port === 0x20 || port === 0x21 || port === 0xa0 || port === 0xa1) return this.pic.read(port);
     throw new RangeError("Unmapped or unsupported PC I/O port");
   }
