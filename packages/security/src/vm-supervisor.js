@@ -15,8 +15,10 @@ export class VmSupervisor {
   #instances = new Map();
   #closed = false;
   #limits;
+  #recoveryJournal;
+  #resolveRecoveryDevice;
 
-  constructor({ authority, driver, clock = Date.now, limits = {} } = {}) {
+  constructor({ authority, driver, clock = Date.now, limits = {}, recoveryJournal = null, resolveRecoveryDevice = null } = {}) {
     if (!authority || typeof authority.verify !== "function"
       || typeof driver?.launch !== "function" || typeof driver?.stop !== "function"
       || driver.isolationType !== "microvm" || typeof clock !== "function") {
@@ -34,7 +36,12 @@ export class VmSupervisor {
     this.#limits = Object.freeze(normalized);
     this.#authority = authority;
     this.#driver = driver;
+    if (recoveryJournal !== null && typeof recoveryJournal.recoverPending !== "function") throw new TypeError("Invalid durable recovery journal");
+    if (resolveRecoveryDevice !== null && typeof resolveRecoveryDevice !== "function") throw new TypeError("Invalid recovery disk resolver");
+    if (recoveryJournal && !resolveRecoveryDevice) throw new TypeError("Recovery disk resolver is required with a recovery journal");
     this.#clock = clock;
+    this.#recoveryJournal = recoveryJournal;
+    this.#resolveRecoveryDevice = resolveRecoveryDevice;
   }
 
   async create({ envelope, subject, imageDigest } = {}) {
@@ -68,6 +75,13 @@ export class VmSupervisor {
       this.#instances.delete(id);
       throw error;
     }
+  }
+
+  /** Replay durable guest-disk write-back records before admitting new workloads. */
+  async recoverPending() {
+    if (this.#closed) throw new Error("VM supervisor is closed");
+    if (!this.#recoveryJournal) return [];
+    return this.#recoveryJournal.recoverPending(this.#resolveRecoveryDevice);
   }
 
   /** Stops running VMs whose signed lease has expired or become invalid. */
