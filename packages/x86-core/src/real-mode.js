@@ -252,6 +252,23 @@ export class X86RealModeCpu {
       } else {
         this.#setSubFlags(left, right, width);
       }
+    } else if (opcode === 0x80 || opcode === 0x81 || opcode === 0x83) {
+      const width = opcode === 0x80 ? 8 : 16;
+      const operand = this.#decodeRm(this.#fetch8(), width);
+      const operation = operand.reg;
+      const immediate = opcode === 0x80 ? this.#fetch8() :
+        opcode === 0x83 ? ((this.#fetch8() << 24) >> 24) : this.#fetch16();
+      if (operation !== 0 && operation !== 5 && operation !== 7) {
+        throw new Error("Unsupported immediate arithmetic group operation /" + operation);
+      }
+      const left = operand.read();
+      if (operation === 0) {
+        operand.write(this.#setAddFlags(left, immediate, width));
+      } else {
+        const result = (left - immediate) & (width === 8 ? 0xff : MASK16);
+        this.#setSubFlags(left, immediate, width);
+        if (operation === 5) operand.write(result);
+      }
     } else if (opcode === 0x88 || opcode === 0x8a) {
       const operand = this.#decodeRm(this.#fetch8(), 8);
       if (opcode === 0x88) operand.write(this.#reg8(operand.reg));
