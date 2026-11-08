@@ -83,7 +83,7 @@ sudo NEXARA_EVIDENCE_DIR=/var/lib/nexara/evidence/run-001 \
   NFT_DROP_COUNTER_BEFORE NFT_DROP_COUNTER_AFTER
 ```
 
-The collector runs the live-process jail verifier and two-boot guest-log verifier, copies serial logs into a private evidence directory, hashes them, and records kernel, cgroup, seccomp and NoNewPrivs observations. It fails closed if the process is not in seccomp filter mode, NoNewPrivs is absent, the firewall counter did not increase, or the guest logs lack the required boot/disk/egress markers.
+The collector runs the live-process jail verifier and two-boot guest-log verifier, copies serial logs into a private evidence directory, hashes them, and records kernel, cgroup, seccomp and NoNewPrivs observations. It fails closed if the process is not in seccomp filter mode, NoNewPrivs is absent, the firewall counter did not increase, or the guest logs lack the required boot/disk markers. The guest image does not configure a network interface, so guest egress is not tested by this two-boot harness.
 
 The evidence collector is a verifier, not a guest orchestrator. It cannot create proof by itself: the serial markers must be emitted by the known test guest after its actual disk sync, reboot and egress test. Keep the guest image digest, Firecracker/jailer binary digests, runner identity, and full workflow logs alongside the bundle. Never treat a mocked provider test or the namespace-only preflight as proof of guest isolation.
 
