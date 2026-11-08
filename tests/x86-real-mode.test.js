@@ -254,11 +254,11 @@ test("real-mode segment override prefixes apply to string source but not ES dest
   const { memory, cpu } = cpuFor([
     0xbe,0x00,0x04, // MOV SI,0400h
     0xbf,0x00,0x05, // MOV DI,0500h
-    0x2e,0xa4,       // CS: MOVSB
+    0x26,0xa4,       // ES: MOVSB
     0xf4
   ], { cs: 0, es: 0x100 });
   memory.write(0x400, Uint8Array.of(0x11));
-  memory.write(0x7c00 + 0x400, Uint8Array.of(0x22));
+  memory.write(0x1400, Uint8Array.of(0x22));
   const result = cpu.run({ maxInstructions: 4 });
   assert.equal(result.state, "halted");
   assert.equal(memory.read(0x1500, 1)[0], 0x22);
