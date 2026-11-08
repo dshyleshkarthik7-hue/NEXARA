@@ -300,7 +300,7 @@ test("X86Tss32 reads and writes linear TSS fields through legacy 32-bit paging",
   assert.deepEqual(tss.setTaskState(state), state);
   assert.deepEqual(tss.getTaskState(), state);
   assert.deepEqual(new X86Tss32(memory, { base: 0x3000, limit: 0x67, paging }).getTaskState(), state);
-  assert.notDeepEqual(memory.read(0x3000, 4), memory.read(0x5000, 4));
+  assert.equal(memory.read(0x5000 + 32, 4)[0], 0x34);
 });
 
 test("32-bit far JMP task switch reads TSS images through the active page tables", () => {
@@ -308,9 +308,9 @@ test("32-bit far JMP task switch reads TSS images through the active page tables
   const paging = new X86LegacyPaging32(memory);
   const cpu = new X86Cpu({ memory, mode: 32, legacyPaging32: paging, instructionPointer: 0x700 });
   const gdtBase = 0x100;
-  const putDescriptor = (index, access, base = 0) => memory.write(gdtBase + index * 8,
-    Uint8Array.from([0x67, 0, base & 255, (base >>> 8) & 255, (base >>> 16) & 255, access, 0, (base >>> 24) & 255]));
-  putDescriptor(1, 0x9a); putDescriptor(2, 0x92);
+  const putDescriptor = (index, access, base = 0, limit = 0x67) => memory.write(gdtBase + index * 8,
+    Uint8Array.from([limit & 255, (limit >>> 8) & 255, base & 255, (base >>> 8) & 255, (base >>> 16) & 255, access, (limit >>> 16) & 0x0f, (base >>> 24) & 255]));
+  putDescriptor(1, 0x9a, 0, 0xffff); putDescriptor(2, 0x92, 0, 0xffff);
   putDescriptor(5, 0x8b, 0x3000); // current busy TSS linear base
   putDescriptor(6, 0x89, 0x4000); // target available TSS linear base
   cpu.systemTables.loadGdtr(gdtBase, 0x37); cpu.gdt.setRegister(gdtBase, 0x37);
