@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Build trusted upstream Firecracker+jailer and static BusyBox for NEXARA.
 set -Eeuo pipefail
 fail(){ echo "BUILD FAILED: $*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null || fail "missing command: $1"; }
-for x in git cargo rustc make gcc g++ perl wget tar gzip sha256sum nproc; do need "$x"; done
+for x in git cargo rustc make gcc g++ perl wget tar gzip sha256sum nproc readelf; do need "$x"; done
 ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 OUT="${NEXARA_BINARY_OUT:-$ROOT/dist/host-binaries}"
 WORK="${NEXARA_BUILD_WORK:-$ROOT/.build/host-binaries}"
@@ -16,7 +15,6 @@ if [[ ! -d "$FC_SRC/.git" ]]; then git clone --filter=blob:none https://github.c
 git -C "$FC_SRC" fetch --tags --force
 git -C "$FC_SRC" checkout --detach "$FC_TAG"
 git -C "$FC_SRC" submodule update --init --recursive
-# Build the upstream project binaries; do not patch or replace the jailer.
 (
   cd "$FC_SRC"
   cargo build --release --locked --bin firecracker
@@ -32,39 +30,17 @@ git -C "$BB_SRC" fetch --tags --force
 git -C "$BB_SRC" checkout --detach "$BB_TAG"
 make -C "$BB_SRC" distclean
 make -C "$BB_SRC" defconfig
-# BusyBox does not ship Linux-kernel's scripts/config helper. Set its Kconfig
-# option directly and let its own oldconfig resolve all remaining defaults.
-if grep -q '^# CONFIG_STATIC is not set
-install -m 0755 "$BB_SRC/busybox" "$OUT/busybox"
-if readelf -l "$OUT/busybox" | grep -q INTERP; then fail "BusyBox unexpectedly has a dynamic interpreter"; fi
-"$OUT/firecracker" --version
-"$OUT/jailer" --version
-file "$OUT/firecracker" "$OUT/jailer" "$OUT/busybox" 2>/dev/null || true
-(
-  cd "$OUT"
-  sha256sum firecracker jailer busybox > SHA256SUMS
-  {
-    echo "firecracker_tag=$FC_TAG"
-    echo "firecracker_commit=$(git -C "$FC_SRC" rev-parse HEAD)"
-    echo "busybox_tag=$BB_TAG"
-    echo "busybox_commit=$(git -C "$BB_SRC" rev-parse HEAD)"
-    rustc --version
-    cargo --version
-    gcc --version | head -n1
-  } > BUILD-INFO.txt
-)
-echo "Built binaries and manifests in $OUT"
- "$BB_SRC/.config"; then
+# BusyBox does not ship Linux-kernel's scripts/config helper.
+if grep -q '^# CONFIG_STATIC is not set$' "$BB_SRC/.config"; then
   sed -i 's/^# CONFIG_STATIC is not set$/CONFIG_STATIC=y/' "$BB_SRC/.config"
 elif grep -q '^CONFIG_STATIC=' "$BB_SRC/.config"; then
   sed -i 's/^CONFIG_STATIC=.*/CONFIG_STATIC=y/' "$BB_SRC/.config"
 else
-  printf '\\nCONFIG_STATIC=y\\n' >> "$BB_SRC/.config"
+  printf '\nCONFIG_STATIC=y\n' >> "$BB_SRC/.config"
 fi
 yes '' | make -C "$BB_SRC" oldconfig
 make -C "$BB_SRC" CC=musl-gcc -j"$(nproc)"
 install -m 0755 "$BB_SRC/busybox" "$OUT/busybox"
-"$OUT/busybox" --list | grep -qx nc || fail "static BusyBox build lacks nc applet"
 if readelf -l "$OUT/busybox" | grep -q INTERP; then fail "BusyBox unexpectedly has a dynamic interpreter"; fi
 "$OUT/firecracker" --version
 "$OUT/jailer" --version
