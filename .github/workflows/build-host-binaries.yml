@@ -43,7 +43,9 @@ jobs:
           cd dist/host-binaries
           sha256sum nexara-guest-initramfs.cpio.gz >> SHA256SUMS
           cat KERNEL-SHA256SUMS >> SHA256SUMS
-      - name: Verify complete runtime bundle\n        run: bash scripts/verify-host-bundle.sh\n      - name: Upload complete host and guest bundle
+      - name: Verify complete runtime bundle
+        run: bash scripts/verify-host-bundle.sh
+      - name: Upload complete host and guest bundle
         uses: actions/upload-artifact@v4
         with:
           name: nexara-microvm-bundle-linux-x86_64
