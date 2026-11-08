@@ -141,7 +141,8 @@ test("host guest-write lifecycle persists COW sectors across host restart", asyn
     capabilities: ["storage-read", "storage-write"],
     egress: []
   });
-  const vm = await host.supervisor.create({ envelope, subject: "tenant-writeback", imageDigest });
+  const workloadKey = "integration-workload-writeback-1";
+  const vm = await host.supervisor.create({ envelope, subject: "tenant-writeback", imageDigest, workloadKey });
   assert.equal(vm.state, "running");
   await host.supervisor.stop(vm.id);
   assert.equal((await host.journal.list()).length, 0);
@@ -149,6 +150,7 @@ test("host guest-write lifecycle persists COW sectors across host restart", asyn
 
   // Reopen all persistent host state as if the host process restarted.
   const restarted = await makeHost();
+  assert.equal(await restarted.registry.getOrCreateIdentity({ workloadKey, subject: "tenant-writeback", imageDigest }), vm.id);
   const restored = await restarted.registry.open(vm.id);
   assert.equal(Buffer.from(await restored.readSectors(11))[0], 0x7b);
   assert.equal(Buffer.from(await restored.readSectors(10))[0], 0x21);
