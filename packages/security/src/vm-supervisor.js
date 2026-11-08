@@ -21,8 +21,9 @@ export class VmSupervisor {
   #recoveryPromise = null;
   #rootDiskFactory;
   #releaseRootDisk;
+  #resolveVmIdentity;
 
-  constructor({ authority, driver, clock = Date.now, limits = {}, recoveryJournal = null, resolveRecoveryDevice = null, rootDiskFactory = null, releaseRootDisk = null } = {}) {
+  constructor({ authority, driver, clock = Date.now, limits = {}, recoveryJournal = null, resolveRecoveryDevice = null, rootDiskFactory = null, releaseRootDisk = null, resolveVmIdentity = null } = {}) {
     if (!authority || typeof authority.verify !== "function"
       || typeof driver?.launch !== "function" || typeof driver?.stop !== "function"
       || driver.isolationType !== "microvm" || typeof clock !== "function") {
@@ -44,25 +45,31 @@ export class VmSupervisor {
     if (resolveRecoveryDevice !== null && typeof resolveRecoveryDevice !== "function") throw new TypeError("Invalid recovery disk resolver");
     if (rootDiskFactory !== null && typeof rootDiskFactory !== "function") throw new TypeError("Invalid root disk factory");
     if (releaseRootDisk !== null && typeof releaseRootDisk !== "function") throw new TypeError("Invalid root disk release callback");
+    if (resolveVmIdentity !== null && typeof resolveVmIdentity !== "function") throw new TypeError("Invalid persistent VM identity resolver");
     if (recoveryJournal && !resolveRecoveryDevice) throw new TypeError("Recovery disk resolver is required with a recovery journal");
     this.#clock = clock;
     this.#recoveryJournal = recoveryJournal;
     this.#resolveRecoveryDevice = resolveRecoveryDevice;
     this.#rootDiskFactory = rootDiskFactory;
     this.#releaseRootDisk = releaseRootDisk;
+    this.#resolveVmIdentity = resolveVmIdentity;
     // A configured journal is a startup barrier: no workload may launch until
     // every pending disk has been replayed successfully.
     this.#recoveryComplete = !recoveryJournal;
   }
 
-  async create({ envelope, subject, imageDigest } = {}) {
+  async create({ envelope, subject, imageDigest, workloadKey } = {}) {
     if (this.#closed) throw new Error("VM supervisor is closed");
     if (!this.#recoveryComplete) throw new Error("VM supervisor recovery must complete before VM admission");
     const lease = this.#authority.verify(envelope, {
       now: this.#clock(), subject, imageDigest
     });
     this.#reserve(lease.quotas);
-    const id = randomUUID();
+    const id = this.#resolveVmIdentity
+      ? await this.#resolveVmIdentity({ workloadKey, subject: lease.subject, imageDigest: lease.imageDigest, leaseId: lease.id })
+      : randomUUID();
+    if (typeof id !== "string" || !/^[-a-f0-9]{36}$/i.test(id)) throw new Error("Persistent VM identity resolver returned an invalid UUID");
+    if (this.#instances.has(id)) throw new Error("This persistent VM identity is already active on this supervisor");
     const record = { id, quotas: lease.quotas, state: "starting", leaseId: lease.id, subject: lease.subject, imageDigest: lease.imageDigest, envelope, handle: null, rootfsDevice: null };
     this.#instances.set(id, record);
     let rootfsDevice;
