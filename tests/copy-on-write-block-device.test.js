@@ -172,3 +172,22 @@ test("copy-on-write snapshots restore into a new VM overlay without changing the
   await assert.rejects(() => CopyOnWriteBlockDevice.restore({ snapshotPath: tampered, directory, vmId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase, expectedSnapshotDigest: metadata.snapshotDigest }), /integrity digest mismatch/);
   await restored.close(); await source.close(); await immutableBase.close();
 });
+
+
+test("copy-on-write disk imports stopped guest writes from a raw Firecracker disk", async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "nexara-cow-import-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const baseBytes = new Uint8Array(8 * 512).fill(0x31);
+  const base = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 8 });
+  await base.writeSectors(0, baseBytes); await base.close();
+  const immutableBase = await FileBlockDevice.open({ directory, vmId: "ba5e1234-1234-1234", sectors: 8, readOnly: true, create: false });
+  const overlay = await CopyOnWriteBlockDevice.open({ directory, vmId: "12345678-1234-4234-8234-123456789abc", sectors: 8, baseDigest: digestOf(baseBytes), baseDevice: immutableBase });
+  const guestRaw = path.join(directory, "guest.raw");
+  await writeFile(guestRaw, baseBytes, { mode: 0o600, flag: "wx" });
+  const guestImage = await readFile(guestRaw); guestImage.fill(0x6d, 2 * 512, 3 * 512); await writeFile(guestRaw, guestImage);
+  const result = await overlay.importRaw(guestRaw);
+  assert.equal(result.changedSectors, 1);
+  assert.equal((await overlay.readSectors(2))[0], 0x6d);
+  assert.equal((await overlay.readSectors(1))[0], 0x31);
+  await overlay.close(); await immutableBase.close();
+});
