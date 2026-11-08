@@ -274,9 +274,9 @@ export class X86RealModeCpu {
         this.ip = (this.ip + (displacement & 0x80 ? displacement - 0x100 : displacement)) & MASK16;
       }
     } else if (opcode === 0xa1) {
-      this.ax = this.#read16(this.ds, this.#fetch16());
+      this.ax = this.#read16(this.segmentOverride ?? this.ds, this.#fetch16());
     } else if (opcode === 0xa3) {
-      this.#write16(this.ds, this.#fetch16(), this.ax);
+      this.#write16(this.segmentOverride ?? this.ds, this.#fetch16(), this.ax);
     } else if (opcode === 0xeb) {
       const displacement = this.#fetch8();
       this.ip = (this.ip + (displacement & 0x80 ? displacement - 0x100 : displacement)) & MASK16;
