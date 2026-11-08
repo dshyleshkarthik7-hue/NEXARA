@@ -10,6 +10,7 @@ NEXARA currently combines a browser editor/workspace, a server session gateway, 
 - Server HTTP/WebSocket session gateway, authenticated PTY session registry, per-client quotas, rate limits, idle expiry, and origin allowlisting.
 - Unsandboxed host PTY execution disabled by default. An explicit trusted-local opt-in is restricted to loopback binding.
 - Bounded guest memory, snapshots, software virtual mappings, four-level x86-64 page-table walking, and a legacy non-PAE 32-bit paging path.
+- Bounded in-memory sector block device with 512-byte sector reads/writes, read-only mode, capacity checks, and snapshot/restore support. This is a storage primitive only; ATA/AHCI controller emulation and firmware boot are not implemented.
 - Experimental 32/64-bit x86 integer interpreter with a limited instruction set, CPU/memory save-state support, selected control-register/MSR operations, and guest I/O bus instructions.
 - Bounded GDT/LDT/IDT readers, GDTR/IDTR/LDTR/TR state, selected LGDT/LIDT/LLDT/LTR instructions, 32-bit and 64-bit TSS descriptor validation, 32-bit TSS I/O bitmap enforcement, 64-bit TSS RSP/IST state, long-mode IDT interrupt delivery, and constrained protected-mode privilege-transition paths.
 - PC/AT-style PIC/PIT device models and interrupt-fabric integration.
