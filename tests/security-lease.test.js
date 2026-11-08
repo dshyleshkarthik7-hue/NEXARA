@@ -45,3 +45,22 @@ test("lease payload and returned verified state cannot be mutated", () => {
   const lease = authority.verify(envelope);
   assert.equal(Object.isFrozen(lease.capabilities), true);
 });
+
+
+test("rejects malformed egress hostnames, invalid ports, and non-array policies", () => {
+  const authority = new VmLeaseAuthority(secret);
+  for (const egress of ["example..org", "-bad.example", "bad-.example", "example.org:0", "example.org:65536", "example.org:abc"]) {
+    assert.throws(() => authority.issue({ subject: "tenant", imageDigest: digest, egress: [egress] }), /Egress/);
+  }
+  assert.throws(() => authority.issue({ subject: "tenant", imageDigest: digest, egress: "example.org" }), /array/);
+  assert.throws(() => authority.issue({ subject: "tenant", imageDigest: digest, capabilities: "serial" }), /array/);
+  assert.doesNotThrow(() => authority.issue({ subject: "tenant", imageDigest: digest, egress: ["example.org", "api.example.org:443"] }));
+});
+
+test("rejects issue-time overflow and malformed signatures", () => {
+  const authority = new VmLeaseAuthority(secret);
+  assert.throws(() => authority.issue({ subject: "tenant", imageDigest: digest }, { now: Number.MAX_SAFE_INTEGER - 1 }), /TTL/);
+  const envelope = authority.issue({ subject: "tenant", imageDigest: digest }, { now: 1000 });
+  assert.throws(() => authority.verify({ ...envelope, signature: "not-base64url" }, { now: 1100 }), /Malformed/);
+  assert.throws(() => authority.verify(envelope, { now: -1 }), /Malformed/);
+});
