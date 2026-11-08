@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, lstat, open, readFile, rename, unlink } from "node:fs/promises";
+import { mkdir, lstat, open, readFile, unlink, link } from "node:fs/promises";
 import path from "node:path";
 import { CopyOnWriteBlockDevice } from "../../runtime/src/copy-on-write-block-device.js";
 
@@ -64,7 +64,7 @@ export class PersistentVmRegistry {
       finally { await file.close(); }
       // Hard-link publication is exclusive: never overwrite a concurrently
       // registered VM identity. Metadata is small and lives on one filesystem.
-      await (await import("node:fs/promises")).link(temporary, metadataPath);
+      await link(temporary, metadataPath);
       await unlink(temporary);
       const dir = await open(this.#directory, "r");
       try { await dir.sync(); } finally { await dir.close(); }
