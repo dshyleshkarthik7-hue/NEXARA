@@ -20,17 +20,19 @@ export class LinuxJailerProvider {
   #parentCgroup;
   #spawn;
   #stopTimeoutMs;
+  #networkProvider;
 
   constructor({
     jailerPath, firecrackerPath, chrootBaseDir = "/srv/jailer",
     uid, gid, netnsPath, parentCgroup = "nexara",
-    spawn = nodeSpawn, stopTimeoutMs = 5000
+    spawn = nodeSpawn, stopTimeoutMs = 5000, networkProvider
   } = {}) {
     for (const [name, value] of Object.entries({ jailerPath, firecrackerPath, chrootBaseDir, netnsPath })) {
       if (typeof value !== "string" || !path.isAbsolute(value)) throw new TypeError(name + " must be an absolute path");
     }
     if (!Number.isSafeInteger(uid) || uid < 1 || !Number.isSafeInteger(gid) || gid < 1
       || typeof spawn !== "function" || !Number.isSafeInteger(stopTimeoutMs)
+      || !networkProvider || typeof networkProvider.provision !== "function" || typeof networkProvider.release !== "function"
       || stopTimeoutMs < 100 || stopTimeoutMs > 60000
       || !/^[a-zA-Z0-9_.-]{1,64}$/.test(parentCgroup)) {
       throw new TypeError("Invalid jailer identity, process adapter, timeout or cgroup");
@@ -44,6 +46,7 @@ export class LinuxJailerProvider {
     this.#parentCgroup = parentCgroup;
     this.#spawn = spawn;
     this.#stopTimeoutMs = stopTimeoutMs;
+    this.#networkProvider = networkProvider;
   }
 
   async start(config) {
@@ -66,6 +69,7 @@ export class LinuxJailerProvider {
     }
     if (namespace.isSymbolicLink()) throw new Error("Network namespace handle must not be a symlink");
 
+    const network = await this.#networkProvider.provision({ id: config.id, uid: this.#uid, gid: this.#gid });
     const jailRoot = path.join(
       this.#chrootBaseDir, path.basename(this.#firecrackerPath), config.id, "root"
     );
@@ -85,11 +89,13 @@ export class LinuxJailerProvider {
       "--cgroup", "memory.max=" + String(config.quotas.memoryMiB * 1024 * 1024),
       "--cgroup", "memory.swap.max=0",
       "--cgroup", "pids.max=128",
-      "--netns", this.#netnsPath,
+      "--netns", network.netnsPath,
       "--",
       "--api-sock", "/firecracker.socket"
     ];
-    const child = this.#spawn(this.#jailerPath, args, {
+    let child;
+    try {
+    child = this.#spawn(this.#jailerPath, args, {
       cwd: this.#chrootBaseDir,
       env: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin" },
       stdio: ["ignore", "ignore", "pipe"],
@@ -106,17 +112,23 @@ export class LinuxJailerProvider {
       child.once("error", onError);
       child.once("spawn", onSpawn);
     });
+    } catch (error) {
+      await this.#networkProvider.release(network).catch(() => {});
+      throw error;
+    }
     let stopped = false;
     return Object.freeze({
       socketPath,
       jailRoot,
       uid: this.#uid,
       gid: this.#gid,
+      network,
       child,
       stop: async () => {
         if (stopped) return;
         stopped = true;
-        await terminate(child, this.#stopTimeoutMs);
+        try { await terminate(child, this.#stopTimeoutMs); }
+        finally { await this.#networkProvider.release(network); }
       }
     });
   }
