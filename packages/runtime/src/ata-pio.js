@@ -49,6 +49,7 @@ export class AtaPioDevice {
     this.transfer = null;
     this.transferIndex = 0;
     this.transferKind = null;
+    this.remainingSectors = 0;
   }
 
   #lba() {
@@ -56,7 +57,8 @@ export class AtaPioDevice {
   }
 
   #completeSector() {
-    this.sectorCount = (this.sectorCount - 1) & 0xff;
+    this.remainingSectors--;
+    this.sectorCount = this.remainingSectors & 0xff;
     const next = (this.#lba() + 1) & 0x0fffffff;
     this.lbaLow = next & 0xff;
     this.lbaMid = (next >>> 8) & 0xff;
@@ -70,6 +72,7 @@ export class AtaPioDevice {
     this.transfer = null;
     this.transferKind = null;
     this.transferIndex = 0;
+    this.remainingSectors = 0;
   }
 
   #beginRead(words, kind) {
@@ -79,33 +82,52 @@ export class AtaPioDevice {
     this.status = STATUS_DRDY | STATUS_DRQ;
   }
 
+  #loadReadSector() {
+    try {
+      const bytes = this.disk.readSectors(this.#lba(), 1);
+      const words = new Uint16Array(256);
+      for (let i = 0; i < 256; i++) words[i] = bytes[i * 2] | (bytes[i * 2 + 1] << 8);
+      this.#beginRead(words, "read");
+    } catch {
+      this.#fail();
+    }
+  }
+
+  #beginWriteSector() {
+    this.transfer = new Uint16Array(256);
+    this.transferKind = "write";
+    this.transferIndex = 0;
+    this.status = STATUS_DRDY | STATUS_DRQ;
+  }
+
+  #finishSector() {
+    this.#completeSector();
+    if (this.remainingSectors > 0) {
+      if (this.command === 0x20) this.#loadReadSector();
+      else this.#beginWriteSector();
+      return;
+    }
+    this.transfer = null;
+    this.transferKind = null;
+    this.transferIndex = 0;
+    this.status = STATUS_DRDY;
+  }
+
   #execute(command) {
     this.command = command;
     this.error = 0;
     if (command === 0xec) {
+      this.remainingSectors = 0;
       this.sectorCount = 1;
       this.#beginRead(identifyWords(this.disk), "identify");
       return;
     }
     if (command !== 0x20 && command !== 0x30) return this.#fail();
-    if (this.sectorCount !== 1 || (this.driveHead & 0x40) === 0) return this.#fail();
-    const lba = this.#lba();
-    try {
-      if (command === 0x20) {
-        const bytes = this.disk.readSectors(lba, 1);
-        const words = new Uint16Array(256);
-        for (let i = 0; i < 256; i++) words[i] = bytes[i * 2] | (bytes[i * 2 + 1] << 8);
-        this.#beginRead(words, "read");
-      } else {
-        if (this.disk.readOnly) return this.#fail();
-        this.transfer = new Uint16Array(256);
-        this.transferKind = "write";
-        this.transferIndex = 0;
-        this.status = STATUS_DRDY | STATUS_DRQ;
-      }
-    } catch {
-      this.#fail();
-    }
+    if ((this.driveHead & 0x40) === 0) return this.#fail();
+    this.remainingSectors = this.sectorCount || 256;
+    if (command === 0x30 && this.disk.readOnly) return this.#fail();
+    if (command === 0x20) this.#loadReadSector();
+    else this.#beginWriteSector();
   }
 
   read(port, width = 8) {
@@ -116,11 +138,13 @@ export class AtaPioDevice {
       }
       const value = this.transfer[this.transferIndex++];
       if (this.transferIndex === 256) {
-        if (this.transferKind === "read") this.#completeSector();
-        this.transfer = null;
-        this.transferKind = null;
-        this.transferIndex = 0;
-        this.status = STATUS_DRDY;
+        if (this.transferKind === "read") this.#finishSector();
+        else {
+          this.transfer = null;
+          this.transferKind = null;
+          this.transferIndex = 0;
+          this.status = STATUS_DRDY;
+        }
       }
       return BigInt(value);
     }
@@ -156,8 +180,7 @@ export class AtaPioDevice {
         }
         try {
           this.disk.writeSectors(this.#lba(), bytes);
-          this.#completeSector();
-          this.status = STATUS_DRDY;
+          this.#finishSector();
         } catch {
           this.#fail();
         }
@@ -187,7 +210,7 @@ export class AtaPioDevice {
       lbaLow: this.lbaLow, lbaMid: this.lbaMid, lbaHigh: this.lbaHigh,
       driveHead: this.driveHead, status: this.status, command: this.command,
       transfer: this.transfer?.slice() ?? null, transferIndex: this.transferIndex,
-      transferKind: this.transferKind
+      transferKind: this.transferKind, remainingSectors: this.remainingSectors
     });
   }
 
@@ -196,6 +219,7 @@ export class AtaPioDevice {
     if (!state || state.format !== "nexara-ata-pio-v1"
       || byteFields.some(key => !Number.isInteger(state[key]) || state[key] < 0 || state[key] > 255)
       || !Number.isInteger(state.transferIndex) || state.transferIndex < 0 || state.transferIndex > 255
+      || !Number.isInteger(state.remainingSectors) || state.remainingSectors < 0 || state.remainingSectors > 256
       || !(state.transfer === null || (state.transfer instanceof Uint16Array && state.transfer.length === 256))
       || !([null, "identify", "read", "write"].includes(state.transferKind))
       || ((state.transfer === null) !== (state.transferKind === null))
@@ -207,6 +231,7 @@ export class AtaPioDevice {
     this.driveHead = state.driveHead; this.status = state.status; this.command = state.command;
     this.transfer = state.transfer?.slice() ?? null;
     this.transferIndex = state.transferIndex; this.transferKind = state.transferKind;
+    this.remainingSectors = state.remainingSectors;
     return this.snapshot();
   }
 }
