@@ -172,7 +172,7 @@ test("real-mode ModRM MOV and XOR support DS and SS effective addresses", () => 
   assert.equal(cpu.cx, 0x1234);
   assert.equal(cpu.dx, 0x1234);
   assert.deepEqual(memory.read(0x502, 2), Uint8Array.of(0, 0));
-  assert.deepEqual(memory.read(0x6602, 2), Uint8Array.of(0x34, 0x12));
+  assert.deepEqual(memory.read(0x60602, 2), Uint8Array.of(0x34, 0x12));
 });
 
 test("real-mode REP MOVSB and STD direction copy bytes in the requested direction", () => {
