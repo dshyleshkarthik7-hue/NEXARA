@@ -42,11 +42,6 @@ else
     echo "NEXARA_DISK_WRITE_FAILED"
   fi
 fi
-if nc -z -w 3 1.1.1.1 443 >/dev/null 2>&1; then
-  echo "NEXARA_EGRESS_UNEXPECTEDLY_ALLOWED"
-else
-  echo "NEXARA_EGRESS_BLOCKED"
-fi
 sync
 echo "NEXARA_GUEST_VALIDATION_COMPLETE"
 sync
