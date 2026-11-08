@@ -281,7 +281,7 @@ test("real-mode direct accumulator MOV honors segment override prefixes", () => 
 test("real-mode immediate arithmetic group supports ADD, SUB and CMP byte/word forms", () => {
   const { cpu } = cpuFor([
     0xb8,0x00,0x00,       // MOV AX,0
-    0x05,0x01,0x00,       // ADD AX,1
+    0x81,0xc0,0x01,0x00,  // ADD AX,1
     0x83,0xc0,0xff,       // ADD AX,-1
     0x80,0xe8,0x01,       // SUB AL,1
     0x81,0xf8,0xff,0x00,  // CMP AX,00FFh
