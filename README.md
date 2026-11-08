@@ -29,7 +29,7 @@ NEXARA currently combines a browser editor/workspace, a server session gateway, 
 - Native build prerequisites for `node-pty`
 
 ```sh
-npm ci
+npm install
 npm run dev
 ```
 
