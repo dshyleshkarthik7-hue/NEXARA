@@ -228,6 +228,13 @@ test("far CALL to an available TSS sets backlink and nested-task state", () => {
   assert.equal((cpu.flags & (1n << 14n)) !== 0n, true);
   assert.equal(memory.read(gdtBase + 5 * 8 + 5, 1)[0] & 0x0f, 0x0b);
   assert.equal(memory.read(gdtBase + 6 * 8 + 5, 1)[0] & 0x0f, 0x0b);
+  memory.write(0x750, Uint8Array.of(0xcf)); // nested-task IRET
+  cpu.step();
+  assert.equal(cpu.ip, 0x704);
+  assert.equal(cpu.systemTables.task.selector, 0x28);
+  assert.equal((cpu.flags & (1n << 14n)) !== 0n, false);
+  assert.equal(memory.read(gdtBase + 5 * 8 + 5, 1)[0] & 0x0f, 0x0b);
+  assert.equal(memory.read(gdtBase + 6 * 8 + 5, 1)[0] & 0x0f, 0x09);
 });
 
 test("32-bit IDT task gate switches tasks and records backlink", () => {
