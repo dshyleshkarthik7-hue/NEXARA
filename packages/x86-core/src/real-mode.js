@@ -292,6 +292,45 @@ export class X86RealModeCpu {
         this.#setSubFlags(left, immediate, width);
         if (operation === 5) operand.write(result);
       }
+    } else if ([0xc0,0xc1,0xd0,0xd1,0xd2,0xd3].includes(opcode)) {
+      const width = (opcode === 0xc0 || opcode === 0xd0 || opcode === 0xd2) ? 8 : 16;
+      const operand = this.#decodeRm(this.#fetch8(), width);
+      const operation = operand.reg;
+      const count = (opcode === 0xc0 || opcode === 0xc1) ? this.#fetch8() :
+        (opcode === 0xd0 || opcode === 0xd1) ? 1 : (this.cx & 0xff);
+      let value = operand.read();
+      const mask = width === 8 ? 0xff : MASK16, sign = width === 8 ? 0x80 : 0x8000;
+      const bits = width;
+      let n = count & 0x1f;
+      if (operation > 7 || ![0,1,4,5,6,7].includes(operation)) {
+        this.segmentOverride = null; this.ip = start;
+        throw new Error("Unsupported shift/rotate operation /" + operation);
+      }
+      if (n !== 0) {
+        const original = value;
+        let carry = 0;
+        for (let i = 0; i < n; i++) {
+          if (operation === 0) { carry = (value & sign) ? 1 : 0; value = ((value << 1) | carry) & mask; }
+          else if (operation === 1) { carry = value & 1; value = (value >>> 1) | (carry ? sign : 0); }
+          else if (operation === 4 || operation === 6) { carry = (value & sign) ? 1 : 0; value = (value << 1) & mask; }
+          else if (operation === 5) { carry = value & 1; value >>>= 1; }
+          else { carry = value & 1; value = (value >>> 1) | (value & sign); }
+        }
+        const oldCarry = this.flags & CF;
+        let updated = this.flags & ~(CF | OF);
+        if (carry) updated |= CF;
+        if (operation === 0 && n === 1 && Boolean(value & sign) !== Boolean(carry)) updated |= OF;
+        else if (operation === 1 && n === 1 && Boolean(value & sign) !== Boolean(value & (sign >>> 1))) updated |= OF;
+        else if ((operation === 4 || operation === 6) && n === 1 && Boolean(value & sign) !== Boolean(carry)) updated |= OF;
+        else if (operation === 5 && n === 1 && (original & sign)) updated |= OF;
+        else if (operation === 7 && n === 1) updated |= 0;
+        if (operation >= 4) {
+          const parity = ([0,1,2,3,4,5,6,7].filter(bit => (value >>> bit) & 1).length % 2 === 0);
+          updated = (updated & ~(PF | ZF | SF)) | (value === 0 ? ZF : 0) | (value & sign ? SF : 0) | (parity ? PF : 0);
+        }
+        this.flags = updated | 2;
+        operand.write(value);
+      }
     } else if (opcode === 0x8c || opcode === 0x8e) {
       const operand = this.#decodeRm(this.#fetch8(), 16);
       const segmentIndex = operand.reg;
