@@ -56,8 +56,8 @@ test("ATA PIO rejects writes to a read-only backing disk", () => {
   const ata = new AtaPioDevice({ disk: new MemoryBlockDevice({ sectors: 4, readOnly: true }) });
   setLba(ata, 0);
   ata.write(0x1f7, 0x30);
-  for (let i = 0; i < 256; i++) ata.write(0x1f0, i, 16);
   assert.equal(ata.read(0x1f7), 0x41n);
+  assert.equal(ata.read(0x1f1), 0x04n);
 });
 
 test("ATA PIO snapshots preserve and independently restore an in-flight data transfer", () => {
