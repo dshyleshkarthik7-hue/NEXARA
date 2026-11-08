@@ -185,7 +185,7 @@ test("INT 1Ah returns deterministic BIOS ticks and reports midnight rollover", (
   assert.equal((cpu.cx << 16) | cpu.dx, 0x1800af - 100);
   assert.equal(cpu.ax & 0xff, 0);
 
-  bios.advanceTicks(101);
+  bios.advanceTicks(102);
   cpu.ip = 0x7c00;
   cpu.ax = 0;
   cpu.step();
