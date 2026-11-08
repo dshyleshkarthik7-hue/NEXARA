@@ -250,7 +250,7 @@ export class PcAtInterruptFabric {
   ioWrite(port, value, width = 8) {
     if (!Number.isInteger(port) || port < 0 || port > 0xffff) throw new RangeError("Invalid I/O port");
     if (port >= 0x1f0 && port <= 0x1f7 && this.ata) return this.ata.write(port, value, width);
-    if (width !== 8) throw new RangeError("PC/AT PIC and PIT ports support byte accesses only");
+    if (width !== 8) throw new RangeError("PC/AT PIC and PIT ports support byte reads only");
     if (port === 0x20 || port === 0x21 || port === 0xa0 || port === 0xa1) return this.pic.write(port, value);
     if (port === 0x40) return this.pit.writeCounter0(value);
     if (port === 0x43) return this.pit.writeControl(value);
