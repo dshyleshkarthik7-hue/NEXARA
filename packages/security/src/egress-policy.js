@@ -20,13 +20,34 @@ function isPublicIPv4(address) {
   return !blocked.some(([base,bits]) => inV4(address,base,bits));
 }
 
+function ipv6Words(address) {
+  let value = address.toLowerCase().split("%")[0];
+  const mapped = value.match(/(.*:)(\\d+\\.\\d+\\.\\d+\\.\\d+)$/);
+  if (mapped) {
+    const octets = mapped[2].split(".").map(Number);
+    value = mapped[1] + ((octets[0] << 8) | octets[1]).toString(16) + ":" + ((octets[2] << 8) | octets[3]).toString(16);
+  }
+  const halves = value.split("::");
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const missing = 8 - left.length - right.length;
+  if ((halves.length === 1 && missing !== 0) || (halves.length === 2 && missing < 1)) return null;
+  const words = [...left, ...Array(missing).fill("0"), ...right].map(part => Number.parseInt(part, 16));
+  return words.length === 8 && words.every(word => Number.isInteger(word) && word >= 0 && word <= 0xffff) ? words : null;
+}
+
 function isPublicIPv6(address) {
-  const value = address.toLowerCase().split("%")[0];
-  if (value === "::" || value === "::1" || value.startsWith("fc") || value.startsWith("fd")
-    || /^fe[89ab]/.test(value) || value.startsWith("ff")) return false;
-  const mapped = value.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPublicIPv4(mapped[1]);
-  return value.includes(":");
+  const words = ipv6Words(address);
+  if (!words) return false;
+  // Permit only global-unicast 2000::/3; deny protocol, documentation,
+  // benchmarking, 6to4 and other special-purpose assignments.
+  if ((words[0] & 0xe000) !== 0x2000) return false;
+  if (words[0] === 0x2001 && (words[1] === 0x0000 || words[1] === 0x0002
+    || words[1] === 0x0db8 || (words[1] & 0xfff0) === 0x0010
+    || (words[1] & 0xfff0) === 0x0020)) return false;
+  if (words[0] === 0x2002) return false;
+  return true;
 }
 
 export function isPublicAddress(address) {
