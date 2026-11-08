@@ -52,7 +52,7 @@ test("Linux jailer provider builds a fail-closed Firecracker jailer command", as
   assert.ok(invoked.args.includes("--netns"));
   assert.ok(invoked.args.includes("/run/netns/nexara-test"));
   assert.ok(invoked.args.includes("cpu.max=150000 100000"));
-  assert.ok(invoked.args.includes("memory.max=805306368"));
+  assert.ok(invoked.args.includes("memory.max=939524096"));
   assert.equal(host.socketPath, path.join("/j", "firecracker",
     "12345678-1234-4234-8234-123456789abc", "root", "firecracker.socket"));
   assert.equal(host.jailRoot, path.dirname(host.socketPath));
