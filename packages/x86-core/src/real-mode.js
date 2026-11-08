@@ -9,7 +9,7 @@ const MASK16 = 0xffff;
  * protected-mode transitions, DMA, or complete 8086 compatibility.
  */
 export class X86RealModeCpu {
-  constructor({ memory, cs = 0, ip = 0x7c00, ds = 0, es = 0, ss = 0, sp = 0x7c00, a20Enabled = false } = {}) {
+  constructor({ memory, cs = 0, ip = 0x7c00, ds = 0, es = 0, ss = 0, sp = 0x7c00, a20Enabled = false, interruptHandler = null } = {}) {
     if (!(memory instanceof GuestMemory)) throw new TypeError("memory must be GuestMemory");
     for (const [name, value] of Object.entries({ cs, ip, ds, es, ss, sp })) {
       if (!Number.isInteger(value) || value < 0 || value > MASK16) throw new RangeError(name + " must be a 16-bit unsigned value");
@@ -19,7 +19,9 @@ export class X86RealModeCpu {
     this.ax = 0; this.cx = 0; this.dx = 0; this.bx = 0;
     this.bp = 0; this.si = 0; this.di = 0;
     this.flags = 2;
+    if (interruptHandler !== null && typeof interruptHandler !== "function") throw new TypeError("interruptHandler must be a function");
     this.a20Enabled = Boolean(a20Enabled);
+    this.interruptHandler = interruptHandler;
     this.halted = false;
     this.instructionsExecuted = 0;
   }
@@ -127,13 +129,27 @@ export class X86RealModeCpu {
       this.flags = (this.#pop() | 2) & 0x0fff;
     } else if (opcode === 0xcd) {
       const vector = this.#fetch8();
-      const vectorAddress = vector * 4;
-      this.#push(this.flags);
-      this.#push(this.cs);
-      this.#push(this.ip);
-      this.flags &= ~(IF | TF);
-      this.ip = this.#read16(0, vectorAddress);
-      this.cs = this.#read16(0, vectorAddress + 2);
+      const savedInterruptFlags = this.flags & (IF | TF);
+      let handled = false;
+      if (this.interruptHandler) {
+        this.flags &= ~(IF | TF);
+        try {
+          handled = this.interruptHandler(this, vector) === true;
+        } catch (error) {
+          this.flags = (this.flags & ~(IF | TF)) | savedInterruptFlags;
+          throw error;
+        }
+        this.flags = (this.flags & ~(IF | TF)) | savedInterruptFlags;
+      }
+      if (!handled) {
+        const vectorAddress = vector * 4;
+        this.#push(this.flags);
+        this.#push(this.cs);
+        this.#push(this.ip);
+        this.flags &= ~(IF | TF);
+        this.ip = this.#read16(0, vectorAddress);
+        this.cs = this.#read16(0, vectorAddress + 2);
+      }
     } else if (opcode === 0xcf) {
       this.ip = this.#pop();
       this.cs = this.#pop();
